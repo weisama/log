@@ -1,0 +1,105 @@
+Win家庭版修改为专业版https://blog.csdn.net/m0_66125055/article/details/139701749
+修改用户名为英文BV1We4y1u7vJ
+使用git和giehub，BV1Hkr7YYEh8
+
+
+ubuntu安装必备软件
+sudo wget http://fishros.com/install -O fishros && . fishros
+sudo chmod -R 777 /folder
+
+配置终端快捷键
+sudo apt update
+sudo apt upgrade
+
+配置时间
+sudo apt install ntpdate
+sudo ntpdate time.windows.com
+sudo apt install util-linux-extra
+sudo hwclock --localtime --systohc
+
+默认启动windows
+sudo apt install gedit
+sudo gedit /etc/default/grub
+GRUB_DEFAULT=4
+
+安装了搜狗输入法
+https://blog.csdn.net/qq_42428446/article/details/144352391
+输入法悬浮窗变为弹窗
+注销当前用户
+选择您的用户名
+点击右下角齿轮图标 🛠
+选择ubuntu
+输入法失去焦点解决方法
+sudo apt-get purge sogoupinyin
+sudo rm -rf ~/.sogouinput
+sudo rm -rf ~/.config/Sogou*
+sudo rm -rf ~/.cache/sogou*
+sudo rm -rf /etc/sogou*
+sudo apt-get remove --purge fcitx* fcitx-*
+sudo rm -rf /etc/fcitx*
+rm -rf ~/.config/fcitx*
+sudo apt-get autoremove
+reboot
+sudo apt update
+sudo apt upgrade fcitx
+sudo cp /usr/share/applications/fcitx.desktop /etc/xdg/autostart/
+sudo dpkg -i /home/chen/sogoupinyin_4.2.1.145_amd64.deb
+reboot
+sudo apt install fcitx-libpinyin
+sudo apt install ibus-pinyin
+im-config -n ibus
+reboot
+
+网速小插件
+sudo add-apt-repository ppa:fossfreedom/indicator-sysmonitor -y
+sudo apt-get update
+sudo apt-get install indicator-sysmonitor
+
+安装了微信
+sudo wget http://fishros.com/install -O fishros && . fishros
+
+
+安装了clash
+https://zhuanlan.zhihu.com/p/2852384493
+核心无法访问，删除配置文件即可
+https://fn1.feiniaoyun13.life/api/v1/client/subscribe?token=594039441619c29370a196c0950df146
+
+安装了谷歌
+https://blog.csdn.net/no1xium/article/details/127358742
+
+安装QGC
+https://blog.csdn.net/weixin_55944949/article/details/130895363
+
+***安装clash，设置部分网站不使用代理
+https://zhuanlan.zhihu.com/p/2852384493
+
+#安装百度网盘
+https://blog.csdn.net/weixin_53384447/article/details/135625030
+创建快捷方式
+https://blog.csdn.net/weixin_40240807/article/details/140328653
+sudo gedit clash.desktop
+# 创建clash的快捷方式
+[Desktop Entry]
+Name=clash
+Exec=/home/chen/software/clash/cfw
+Type=Application
+Terminal=false
+Icon=//home/chen/software/clash/logo.png
+sudo chmod +x clash.desktop
+sudo mv clash.desktop /usr/share/applications
+
+解决无法启动clash
+sudo chown root /home/chen/software/clash/cfw
+sudo chmod 777 /home/chen/software/clash/cfw
+设置开机自启动
+sudo chown root /home/chen/software/clash/chrome-sandbox
+sudo chmod 4755 /home/chen/software/clash/chrome-sandbox
+sudo mkdir ~/.config/autostart
+sudo gedit ~/.config/autostart/clash.desktop
+[Desktop Entry]
+Name=clash
+Exec=/home/chen/software/clash/cfw
+Type=Application
+Terminal=false
+sudo chmod +x ~/.config/autostart/clash.desktop
+

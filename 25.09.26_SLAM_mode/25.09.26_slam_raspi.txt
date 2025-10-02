@@ -1,0 +1,699 @@
+树莓派ubutnu22-humble中cartographer+镭神N10建图
+
+ROS2创建工作空间
+rm -rf ~/slam_ws/
+mkdir -p ~/slam_ws/src
+cd ~/slam_ws
+rosdep update
+rosdep install --from-paths src --ignore-src -y
+colcon build
+
+################固定串口
+ls /dev/tty*
+sudo apt install udevsudo apt install udev
+
+udevadm info -a -p $(udevadm info -q path -n /dev/ttyACM0)
+#############################
+#USB 设备厂商 ID
+ATTRS{idVendor}=="1a86"	
+#USB 产品 ID
+ATTRS{idProduct}=="55d4"
+#全球唯一的硬件标识符
+ATTRS{serial}=="5954004011"
+#产品描述字符串
+ATTRS{product}=="USB Single Serial"
+#############################
+
+sudo nano /etc/udev/rules.d/99-usb-serial.rules
+#############################
+####匹配厂商 ID和产品 ID（即usb转串口），不匹配序列号
+SUBSYSTEM=="tty", ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="55d4", SYMLINK+="usb_robot", MODE="0666"
+#############################
+
+###加载规则
+sudo udevadm control --reload-rules
+sudo udevadm trigger
+###查看串口已固定
+ls -l /dev/usb_robot
+
+
+
+######################################### 获取点云 ##############################
+sudo apt install ros-humble-diagnostic-updater
+sudo apt install libpcap-dev
+下载功能包
+rm -rf ~/slam_ws
+mkdir -p  ~/slam_ws/src
+cd ~/slam_ws/src
+###实测俩个分支无区别
+git clone -b N10_V1.0 https://github.com/Lslidar/Lslidar_ROS2_driver.git
+git clone -b M10P/N10P https://github.com/Lslidar/Lslidar_ROS2_driver.git
+cp -r ~/slam_ws/src/Lslidar_ROS2_driver/lslidar_driver ~/slam_ws/src
+cp -r ~/slam_ws/src/Lslidar_ROS2_driver/lslidar_msgs ~/slam_ws/src
+rm -rf Lslidar_ROS2_driver
+###修改串口号
+gedit ~/slam_ws/src/lslidar_driver/src/lslidar_driver.cc
+#################
+ttyUSB0 改为 usb_robot
+################
+
+修改参数配置
+gedit ~/slam_ws/src/lslidar_driver/params/lsx10.yaml
+################
+lidar_name: N10
+ttyUSB0 改为 usb_robot
+################
+
+############################注释25-37、40行的rviz相关
+gedit ~/slam_ws/src/lslidar_driver/launch/lslidar_launch.py
+
+编译
+cd ~/slam_ws
+colcon build --packages-select lslidar_msgs
+colcon build --packages-select lslidar_driver
+gedit ~/.bashrc
+###############
+source ~/slam_ws/install/setup.bash
+###############
+#########运行
+ls -l /dev/usb_robot
+ros2 launch lslidar_driver lslidar_launch.py
+
+#####rviz可视化
+rviz2 -d ~/slam_ws/src/lslidar_driver/rviz/lslidar.rviz
+######################################### 获取点云 ##############################
+
+
+
+
+################################# tf转化功能包 ######################################
+功能包实现/scan坐标系laser_link和/map坐标系base_link的tf静态变换
+cd ~/slam_ws/src
+ros2 pkg create --build-type ament_cmake laser_tf_publisher
+mkdir -p laser_tf_publisher/launch
+
+gedit ~/slam_ws/src/laser_tf_publisher/src/static_tf_broadcaster.cpp
+##########################################
+#include <memory>
+#include "rclcpp/rclcpp.hpp"
+#include "tf2_ros/static_transform_broadcaster.h"
+#include "geometry_msgs/msg/transform_stamped.hpp"
+
+class StaticTfBroadcaster : public rclcpp::Node
+{
+public:
+    explicit StaticTfBroadcaster()
+    : Node("static_tf_broadcaster")
+    {
+        tf_broadcaster_ = std::make_shared<tf2_ros::StaticTransformBroadcaster>(this);
+        
+        // 使用定时器确保在系统时间稳定后发布TF
+        timer_ = this->create_wall_timer(
+            std::chrono::milliseconds(500),
+            [this]() {
+                if (!published_) {
+                    publish_static_transforms();
+                    published_ = true;
+                }
+            });
+    }
+
+private:
+    void publish_static_transforms()
+    {
+        // 创建base_link到laser_link的变换
+        geometry_msgs::msg::TransformStamped base_to_laser;
+        
+        // 设置时间戳为0（静态TF应该使用时间戳0）
+        base_to_laser.header.stamp = rclcpp::Time(0);
+        
+        // 设置坐标系关系
+        base_to_laser.header.frame_id = "base_link";  // 父坐标系
+        base_to_laser.child_frame_id = "laser_link";  // 子坐标系
+        
+        // 设置变换参数 - 根据实际安装位置调整!!!
+        // 注意：这些值需要根据雷达的实际安装位置进行测量
+        base_to_laser.transform.translation.x = 0.0;  // 前后方向偏移（前正后负）
+        base_to_laser.transform.translation.y = 0.0;  // 左右方向偏移（左正右负）
+        base_to_laser.transform.translation.z = 0.2;  // 上下方向偏移（上正下负）
+        
+        // 设置旋转（四元数）
+        // 注意：雷达安装角度对SLAM精度至关重要
+        // 默认无旋转（雷达水平安装）
+        base_to_laser.transform.rotation.x = 0.0;
+        base_to_laser.transform.rotation.y = 0.0;
+        base_to_laser.transform.rotation.z = 0.0;
+        base_to_laser.transform.rotation.w = 1.0;
+        
+        // 如果是倾斜安装，使用以下方式计算四元数：
+        // double roll = 0.0;   // 绕X轴旋转（前后倾斜）
+        // double pitch = 0.0;  // 绕Y轴旋转（左右倾斜）
+        // double yaw = 0.0;    // 绕Z轴旋转（水平旋转）
+        // tf2::Quaternion q;
+        // q.setRPY(roll, pitch, yaw);
+        // base_to_laser.transform.rotation = tf2::toMsg(q);
+
+        // 发布变换
+        tf_broadcaster_->sendTransform(base_to_laser);
+        RCLCPP_INFO(this->get_logger(), "Published static transform: base_link -> laser_link");
+    }
+    
+    std::shared_ptr<tf2_ros::StaticTransformBroadcaster> tf_broadcaster_;
+    rclcpp::TimerBase::SharedPtr timer_;
+    bool published_ = false;
+};
+
+int main(int argc, char **argv)
+{
+    rclcpp::init(argc, argv);
+    auto node = std::make_shared<StaticTfBroadcaster>();
+    rclcpp::spin(node);
+    rclcpp::shutdown();
+    return 0;
+}
+#######################################################
+
+gedit ~/slam_ws/src/laser_tf_publisher/launch/tf_broadcaster.launch.py
+#######################################################
+from launch import LaunchDescription
+from launch_ros.actions import Node
+
+def generate_launch_description():
+    return LaunchDescription([
+        Node(
+            package='laser_tf_publisher',
+            executable='static_tf_broadcaster',
+            name='static_tf_broadcaster',
+            output='screen'
+        )
+    ])
+#######################################################
+
+gedit ~/slam_ws/src/laser_tf_publisher/package.xml
+#######################################################
+  <depend>rclcpp</depend>
+  <depend>tf2_ros</depend>
+  <depend>geometry_msgs</depend>
+  <exec_depend>launch</exec_depend>
+#######################################################
+
+gedit ~/slam_ws/src/laser_tf_publisher/CMakeLists.txt
+#######################################################
+cmake_minimum_required(VERSION 3.8)
+project(laser_tf_publisher)
+
+# 编译选项
+if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+  add_compile_options(-Wall -Wextra -Wpedantic)
+endif()
+
+# 找到依赖
+find_package(ament_cmake REQUIRED)
+find_package(rclcpp REQUIRED)
+find_package(tf2_ros REQUIRED)
+find_package(geometry_msgs REQUIRED)
+
+# 添加可执行文件
+add_executable(static_tf_broadcaster src/static_tf_broadcaster.cpp)
+
+# 链接依赖
+ament_target_dependencies(static_tf_broadcaster
+  rclcpp
+  tf2_ros
+  geometry_msgs
+)
+
+# 安装可执行文件
+install(TARGETS static_tf_broadcaster
+  DESTINATION lib/${PROJECT_NAME})
+
+# 安装 launch 文件
+install(DIRECTORY launch
+  DESTINATION share/${PROJECT_NAME})
+
+# 测试相关
+if(BUILD_TESTING)
+  find_package(ament_lint_auto REQUIRED)
+  set(ament_cmake_copyright_FOUND TRUE)
+  set(ament_cmake_cpplint_FOUND TRUE)
+  ament_lint_auto_find_test_dependencies()
+endif()
+
+ament_package()
+#######################################################
+
+cd ~/slam_ws
+colcon build --packages-select laser_tf_publisher
+
+#########启动和验证
+source ~/slam_ws/install/setup.bash
+ros2 launch laser_tf_publisher tf_broadcaster.launch.py
+ros2 run tf2_tools view_frames
+evince frames.pdf
+################################# tf转化功能包 ######################################
+
+
+
+############################# Laser_scan_matcher里程计 #################################
+https://github.com/AlexKaravaev/ros2_laser_scan_matcher
+https://github.com/AlexKaravaev/csm
+
+###安装csm库
+sudo apt-get install build-essential cmake libgsl-dev
+cd ~
+git clone https://github.com/AlexKaravaev/csm
+mkdir -p ~/csm/build
+cd ~/csm/build
+cmake ..
+make -j8
+sudo make install
+# 更新库链接
+sudo ldconfig
+
+
+cd ~/slam_ws/src
+git clone https://github.com/AlexKaravaev/ros2_laser_scan_matcher
+gedit ~/slam_ws/src/ros2_laser_scan_matcher/src/laser_scan_matcher.cpp
+############################################################################
+add_parameter("laser_frame", rclcpp::ParameterValue(std::string("laser"))
+改为
+add_parameter("laser_frame", rclcpp::ParameterValue(std::string("laser_link"))
+############################################################################
+cd ~/slam_ws
+colcon build --packages-select ros2_laser_scan_matcher
+
+#######启动tf变换
+ros2 run tf2_ros static_transform_publisher 0 0 0 0 0 0 base_link laser_link
+ros2 launch laser_tf_publisher tf_broadcaster.launch.py
+#######启动点云
+ros2 launch lslidar_driver lslidar_launch.py
+#######启动里程计
+ros2 run ros2_laser_scan_matcher laser_scan_matcher
+#####打印和查看tf树
+ros2 run tf2_tools view_frames
+
+
+##########################
+失败，卡在获取tf变换无法执行
+##########################
+############################# Laser_scan_matcher里程计 #################################
+
+
+
+
+############################# rf2o_laser_odometry #################################
+https://github.com/MAPIRlab/rf2o_laser_odometry
+
+cd ~/slam_ws/src
+git clone https://github.com/MAPIRlab/rf2o_laser_odometry
+cd ~/slam_ws
+colcon build --packages-select rf2o_laser_odometry
+
+#######启动tf变换
+ros2 run tf2_ros static_transform_publisher 0 0 0 0 0 0 base_link laser_link
+ros2 launch laser_tf_publisher tf_broadcaster.launch.py
+#######启动点云
+ros2 launch lslidar_driver lslidar_launch.py
+########启动里程计
+ros2 launch rf2o_laser_odometry rf2o_laser_odometry.launch.py
+ros2 topic echo /odom_rf2o
+#####rviz可视化
+rviz2 -d ~/slam_ws/src/lslidar_driver/rviz/lslidar.rviz
+############################# rf2o_laser_odometry #################################
+
+
+
+
+################################ cartographer建图 #################################
+https://blog.csdn.net/m262914/article/details/141223818
+
+cd /opt/ros/humble/share/cartographer_ros/configuration_files
+sudo cp backpack_2d.lua mylaser.lua
+sudo chmod 777 mylaser.lua
+#############################
+gedit /opt/ros/humble/share/cartographer_ros/configuration_files/mylaser.lua
+参数参考https://blog.csdn.net/m262914/article/details/141223818
+#################################################################
+include "map_builder.lua"
+include "trajectory_builder.lua"
+
+options = {
+  map_builder = MAP_BUILDER,
+  trajectory_builder = TRAJECTORY_BUILDER,
+  -- 用来发布子地图的ROS坐标系ID，位姿的父坐标系，通常是map。
+  map_frame = "map",
+  -- SLAM算法跟随的坐标系ID
+  tracking_frame = "base_link",
+  -- 将发布map到published_frame之间的tf
+  published_frame = "base_link",
+  -- 位于“published_frame ”和“map_frame”之间，用来发布本地SLAM结果（非闭环），通常是“odom”
+  odom_frame = "odom",
+  -- 是否提供里程计
+  provide_odom_frame = false,
+  -- 只发布二维位姿态（不包含俯仰角）
+  publish_frame_projected_to_2d = false,
+  -- 是否使用里程计数据
+  use_odometry = false,
+  -- 是否使用GPS定位
+  use_nav_sat = false,
+  -- 是否使用路标
+  use_landmarks = false,
+  -- 订阅的laser scan topics的个数
+  num_laser_scans = 1,
+  -- 订阅多回波技术laser scan topics的个数
+  num_multi_echo_laser_scans = 0,
+  -- 分割雷达数据的个数
+  num_subdivisions_per_laser_scan = 1,
+  -- 订阅的点云topics的个数
+  num_point_clouds = 0,
+  -- 使用tf2查找变换的超时秒数
+  lookup_transform_timeout_sec = 0.2,
+  -- 发布submap的周期间隔
+  submap_publish_period_sec = 0.3,
+  -- 发布姿态的周期间隔
+  pose_publish_period_sec = 5e-3,
+  -- 轨迹发布周期间隔
+  trajectory_publish_period_sec = 30e-3,
+  -- 测距仪的采样率
+  rangefinder_sampling_ratio = 1.,
+  --里程记数据采样率
+  odometry_sampling_ratio = 1.,
+  -- 固定的frame位姿采样率
+  fixed_frame_pose_sampling_ratio = 1.,
+  -- IMU数据采样率
+  imu_sampling_ratio = 1.,
+  -- 路标采样率
+  landmarks_sampling_ratio = 1.,
+}
+
+-- 启用2D建图（适配激光雷达）
+MAP_BUILDER.use_trajectory_builder_2d = true
+
+-- 子图参数配置 ---------------------------------------------------------------
+-- 每个子图(submap)包含的激光扫描帧数
+-- 值越高：子图越大，建图更稳定但更新更慢
+-- 值越低：子图更新更快但可能不够稳定
+-- 建议范围：30-90
+TRAJECTORY_BUILDER_2D.submaps.num_range_data = 35
+
+-- 雷达参数配置 ---------------------------------------------------------------
+-- 有效测距的最小距离(米)，低于此值的点云将被过滤
+TRAJECTORY_BUILDER_2D.min_range = 0.
+-- 有效测距的最大距离(米)，高于此值的点云将被过滤
+TRAJECTORY_BUILDER_2D.max_range = 200.
+-- 当雷达未返回数据时，假设该方向此距离内无障碍物(米)
+TRAJECTORY_BUILDER_2D.missing_data_ray_length = 5.
+
+-- 传感器配置 ---------------------------------------------------------------
+-- 是否使用IMU数据：false表示纯激光SLAM模式
+TRAJECTORY_BUILDER_2D.use_imu_data = false
+
+-- 扫描匹配配置 -------------------------------------------------------------
+-- 是否启用实时相关性扫描匹配（提高位姿估计鲁棒性）
+TRAJECTORY_BUILDER_2D.use_online_correlative_scan_matching = true
+-- 线性搜索窗口大小(米)，在当前位置周围搜索最佳匹配的范围
+TRAJECTORY_BUILDER_2D.real_time_correlative_scan_matcher.linear_search_window = 0.1
+-- 平移变化代价权重（值越高，位姿估计越倾向于保持当前位置）
+TRAJECTORY_BUILDER_2D.real_time_correlative_scan_matcher.translation_delta_cost_weight = 10.
+-- 旋转变化代价权重（值越高，位姿估计越倾向于保持当前方向）
+TRAJECTORY_BUILDER_2D.real_time_correlative_scan_matcher.rotation_delta_cost_weight = 1e-1
+
+-- 位姿图优化配置 -----------------------------------------------------------
+-- Huber损失函数的尺度参数（用于鲁棒优化，减小闭环错误匹配的影响）
+POSE_GRAPH.optimization_problem.huber_scale = 1e2
+-- 全局优化频率：每积累多少个节点执行一次位姿图优化
+POSE_GRAPH.optimize_every_n_nodes = 35
+-- 闭环约束接受的最低匹配分数（0-1，值越高闭环检测越严格）
+POSE_GRAPH.constraint_builder.min_score = 0.65
+
+return options
+#################################################################
+
+cd /opt/ros/humble/share/cartographer_ros/launch
+sudo cp backpack_2d.launch.py mylaser.launch.py
+sudo chmod 777 mylaser.launch.py
+gedit /opt/ros/humble/share/cartographer_ros/launch/mylaser.launch.py
+修改参考https://blog.csdn.net/m262914/article/details/141223818
+注释参考中发布rviz2
+#################################################################
+"""
+  Copyright 2018 The Cartographer Authors
+  Copyright 2022 Wyca Robotics (for the ros2 conversion)
+
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+"""
+
+from launch import LaunchDescription
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
+from launch.conditions import IfCondition, UnlessCondition
+from launch.substitutions import LaunchConfiguration
+from launch_ros.actions import Node, SetRemap
+from launch_ros.substitutions import FindPackageShare
+from launch.launch_description_sources import PythonLaunchDescriptionSource
+import os
+
+def generate_launch_description():
+
+    ## ***** Launch arguments *****
+    # 定义是否使用仿真时间参数 (默认为False，实际机器人部署时通常设为False)
+    use_sim_time_arg = DeclareLaunchArgument('use_sim_time', default_value = 'False')
+
+    ## ***** File paths ******
+    # 获取cartographer_ros包的共享路径
+    pkg_share = FindPackageShare('cartographer_ros').find('cartographer_ros')
+   
+    # 原始代码中加载URDF的部分已被注释掉 (修改点1)
+    # 这意味着不再使用默认的backpack_2d模型，TF变换需要由其他节点提供
+    # urdf_dir = os.path.join(pkg_share, 'urdf')
+    # urdf_file = os.path.join(urdf_dir, 'backpack_2d.urdf')
+    # with open(urdf_file, 'r') as infp:
+    #     robot_desc = infp.read()
+
+    ## ***** Nodes *****
+    # 机器人状态发布节点已被注释掉 (修改点2)
+    # 实际部署中应使用机器人的真实URDF文件
+    # robot_state_publisher_node = Node(
+    #     package = 'robot_state_publisher',
+    #     executable = 'robot_state_publisher',
+    #     parameters=[
+    #         {'robot_description': robot_desc},
+    #         {'use_sim_time': LaunchConfiguration('use_sim_time')}],
+    #     output = 'screen'
+    #     )
+
+
+
+    # Cartographer SLAM主节点 (修改点3)
+    cartographer_node = Node(
+        package = 'cartographer_ros',
+        executable = 'cartographer_node',
+        arguments = [
+            '-configuration_directory', FindPackageShare('cartographer_ros').find('cartographer_ros') + '/configuration_files',
+            '-configuration_basename', 'mylaser.lua'],  # 使用自定义配置文件而非默认配置
+        remappings = [
+            ('scan', 'scan')],  # 添加话题重映射确保订阅正确的激光话题
+        output = 'screen'
+        )
+
+    # Cartographer占用网格节点 (修改点4)
+    cartographer_occupancy_grid_node = Node(
+        package = 'cartographer_ros',
+        executable = 'cartographer_occupancy_grid_node',
+        parameters = [
+            {'use_sim_time': False},  # 硬编码为False (注意：应使用参数更灵活)
+            {'resolution': 0.05}],    # 设置地图分辨率为5cm
+        )
+    
+    # RViz2可视化节点 (新增点)
+#    rviz_node = Node(
+#        package='rviz2',
+#        namespace='rviz2',
+#        executable='rviz2',
+#        name='rviz2',
+#        output='screen')
+    
+    # 构建启动描述
+    return LaunchDescription([
+        use_sim_time_arg,  # 时间参数
+        # 节点列表 (修改点5)
+        # robot_state_publisher_node,  # 已注释掉
+        # rviz_node,                   # 新增的RViz可视化节点
+        cartographer_node,           # SLAM核心节点
+        cartographer_occupancy_grid_node,  # 占用网格生成节点
+    ])
+
+#################################################################
+
+#######启动tf变换
+ros2 launch laser_tf_publisher tf_broadcaster.launch.py
+#######启动点云
+ros2 launch lslidar_driver lslidar_launch.py
+#######启动建图
+ros2 launch cartographer_ros mylaser.launch.py
+#####rviz可视化
+rviz2 -d ~/slam_ws/src/lslidar_driver/rviz/lslidar.rviz
+
+
+#####打印和查看tf树
+ros2 run tf2_tools view_frames
+evince frames*.pdf
+rm -rf ~/frames*
+################################ cartographer建图 #################################
+
+################################ 串口输出坐标 #################################
+################法一：树莓派USB接串口转ttl，固定串口
+ls /dev/ttyUSB*
+sudo apt install udevsudo apt install udev
+
+udevadm info -a -p $(udevadm info -q path -n /dev/ttyUSB0)
+#############################
+#USB 设备厂商 ID
+ATTRS{idVendor}=="1a86"	
+#USB 产品 ID
+ATTRS{idProduct}=="55d4"
+#全球唯一的硬件标识符
+ATTRS{serial}=="5954004011"
+#产品描述字符串
+ATTRS{product}=="USB Single Serial"
+#############################
+
+sudo nano /etc/udev/rules.d/99-usb-serial.rules
+#############################
+####匹配厂商 ID和产品 ID（即usb转串口），不匹配序列号
+SUBSYSTEM=="tty", ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="55d4", SYMLINK+="usb_robot", MODE="0666"
+#############################
+
+###加载规则
+sudo udevadm control --reload-rules
+sudo udevadm trigger
+###查看串口已固定
+ls -l /dev/usb_robot
+
+################法二：树莓派GPIO14和15接TR,TX
+查看最新的串口消息
+sudo dmesg | tail
+ls /dev/ttyAMA*
+sudo usermod -aG dialout $USER
+sudo chmod 777 /dev/ttyAMA0
+设置树莓派串口
+sudo nano /boot/firmware/config.txt
+################
+# 禁用蓝牙释放 ttyAMA0
+dtoverlay=disable-bt
+# 启用硬件串口
+enable_uart=1
+# 修复串口时钟稳定性（树莓派3/4必需）
+dtoverlay=miniuart-bt
+###################
+
+
+################串口输出功能包
+cd ~/slam_ws/src
+ros2 pkg create --build-type ament_cmake serial_odom_sender --dependencies rclcpp nav_msgs
+#####修改串口设备
+gedit ~/slam_ws/src/serial_odom_sender/src/serial_odom_sender.cpp
+gedit ~/slam_ws/src/serial_odom_sender/CMakeLists.txt
+cd ~/slam_ws
+colcon build --packages-select serial_odom_sender
+
+#######启动点云
+ros2 launch lslidar_driver lslidar_launch.py
+########启动里程计
+ros2 launch rf2o_laser_odometry rf2o_laser_odometry.launch.py
+#######串口输出坐标
+ros2 run serial_odom_sender serial_odom_sender
+
+#######图形化界面串口软件
+sudo apt-get install cutecom
+sudo cutecom
+
+########################数据格式
+发送频率是坐标话题频率
+波特率115200
+数据类型8N1
+xyz单位为cm，yaw单位为度
+通信协议：
+帧头 0xAA
+x高八位
+x第八位
+y高八位
+y第八位
+z高八位
+z第八位
+yaw高八位
+yaw第八位
+帧尾 0x0A
+################################ 串口输出坐标 #################################
+
+
+
+################################ 开机自启动 ################################
+gedit ~/slam_autostart.sh
+########################################
+#!/bin/bash
+# 加载环境
+source /opt/ros/humble/setup.bash
+source /home/chen/slam_ws/install/setup.bash
+sleep 3
+# 启动命令
+ros2 launch lslidar_driver lslidar_launch.py &
+sleep 3
+ros2 launch rf2o_laser_odometry rf2o_laser_odometry.launch.py &
+sleep 3
+ros2 run serial_odom_sender serial_odom_sender &
+# 防止脚本退出
+while true; do sleep 1000; done
+########################################
+chmod +x ~/slam_autostart.sh
+
+sudo nano /etc/systemd/system/slam_autostart.service
+###############################
+[Unit]
+Description=ROS 2 Autostart Service
+After=network.target
+[Service]
+Type=simple
+User=chen  
+ExecStart=/home/chen/slam_autostart.sh
+Restart=on-failure
+RestartSec=5s
+[Install]
+WantedBy=multi-user.target
+##############################
+
+###打开开机自启动
+sudo systemctl daemon-reload
+sudo systemctl enable slam_autostart.service
+sudo systemctl start slam_autostart.service
+
+# 停止服务
+sudo systemctl stop slam_autostart.service
+# 禁用开机自启动
+sudo systemctl disable slam_autostart.service
+################################ 开机自启动 ################################
+
+
+################################ ubuntu电脑接收打印 ################################
+mkdir -p ~/slam_ws/src
+cd ~/slam_ws/src
+ros2 pkg create --build-type ament_cmake serial_odom_receiver
+gedit ~/slam_ws/src/serial_odom_receiver/src/serial_odom_receiver.cpp
+gedit ~/slam_ws/src/serial_odom_receiver/package.xml
+gedit ~/slam_ws/src/serial_odom_receiver/CMakeLists.txt
+
+cd ~/slam_ws
+colcon build --packages-select serial_odom_receiver
+
+source ~/slam_ws/install/setup.bash
+ros2 run serial_odom_receiver serial_odom_receiver
+################################ ubuntu电脑接收打印 ################################

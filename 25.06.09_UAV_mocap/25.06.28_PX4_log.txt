@@ -1,0 +1,51 @@
+#################机载电脑mavros连接px4后，与机载电脑同wifi的本机QGC远程连接
+sudo nano /opt/ros/humble/share/mavros/launch/px4.launch
+###############################################
+<arg name="gcs_url" default="udp://:14509@" />
+###############################################
+本机打开QGC，添加连接吊载无人机2，port自定义
+type：UDP
+Port：14509
+###机载电脑IP
+Server：
+10.1.1.138:14509
+
+
+设置PX4日志参数，保存日志并绘图
+
+查看动捕数据传输延迟
+日志记录内容默认+机器视觉
+SDLOG_PROFILE = 129
+日志记录从上电到掉电
+SDLOG_MODE = from boot until shutdown
+
+
+飞行完成后，连接到qgc
+analyze tools → 日志下载
+
+##############################
+使用Flight Review可视化
+https://logs.px4.io/upload
+
+##############################
+下载安装FlightPlot可视化
+sudo add-apt-repository ppa:openjdk-r/ppa  # 添加旧版JDK源
+sudo apt update
+sudo apt install openjdk-8-jdk              # 安装JDK 8
+sudo update-alternatives --config java      # 切换Java版本，选择Java 8的编号（通常为2）
+
+git clone --recursive https://github.com/PX4/FlightPlot.git  # 克隆源码
+cd FlightPlot
+ant clean         # 清理旧编译文件
+ant gen_deb       # 生成Deb安装包
+sudo dpkg -i out/production/FlightPlot.deb
+
+无人机姿态
+vehicle_attitude_0.q[x]
+无人机位置
+vehicle_local_position_0
+动捕数据
+vehicle_visual_odometry_0
+
+
+测出动捕数据延迟50ms

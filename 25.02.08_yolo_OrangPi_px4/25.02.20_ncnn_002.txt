@@ -1,0 +1,62 @@
+使用x86系统帮aarch64系统交叉编译ncnn
+参考如下，但仍需修改部分
+https://blog.csdn.net/sxf1061700625/article/details/121630741?spm=1001.2014.3001.5506
+
+sudo su
+sudo apt --fix-broken install
+// 安装.c转二进制文件的交叉编译链工具
+sudo apt-get install gcc-aarch64-linux-gnu
+// 安装.cpp转二进制文件的交叉编译链工具
+sudo apt-get install g++-aarch64-linux-gnu
+
+### 安装依赖库，X86和aarch64系统都要安装，可能会有缺漏，指令来自https://github.com/Tencent/ncnn/wiki/how-to-build
+sudo apt install build-essential git cmake libprotobuf-dev protobuf-compiler libomp-dev libopencv-dev
+
+
+https://github.com/Tencent/ncnn?tab=readme-ov-file
+############### 官网下载未编译版本，不同的版本编译警告次数差异巨大，X86使用ncnn-20241226一个警告，aarch64使用ncnn-20240102一个错误
+
+mkdir build
+cd build
+
+### 选项1，不使用vulkam，在x86系统使用交叉编译工具，编译出可在aarch64系统运行的二进制文件，但不包含example等，有一个警告
+cmake -DCMAKE_TOOLCHAIN_FILE=../toolchains/aarch64-linux-gnu.toolchain.cmake -DNCNN_VULKAN=OFF ..
+
+### 选项2，x86系统直接编译，不使用vulkam，有一个警告
+cmake -DNCNN_VULKAN=OFF ..
+
+
+### 编译安装
+make -j$(nproc)
+make insatll
+
+### 选项1，将编译后/build/install库移植到aarch64系统的库中
+sudo mkdir /usr/local/lib/ncnn
+sudo cp -r install/include/ncnn /usr/local/include/ncnn
+sudo cp -r install/lib/libncnn.a /usr/local/lib/ncnn/libncnn.a
+后续cmake相关的路径
+sudo cp -r install/lib/libncnn.a /usr/local/lib/libncnn.a
+sudo co -r install/lib/cmake/ncnn /usr/local/lib/cmake
+
+
+### 选项2，x86的/build中包含example，可以测试是否成功安装
+cd ../examples
+../build/examples/squeezenet ../images/256-ncnn.png
+### 将编译后/build/install库移植到x86系统的库中
+sudo mkdir /usr/local/lib/ncnn
+sudo cp -r install/include/ncnn /usr/local/include/ncnn
+sudo cp -r install/lib/libncnn.a /usr/local/lib/ncnn/libncnn.a
+后续cmake相关的路径
+sudo cp -r install/lib/libncnn.a /usr/local/lib/libncnn.a
+sudo co -r install/lib/cmake/ncnn /usr/local/lib/cmake
+
+### 选项1，x86系统中才有tools，onnx模型转ncnn模型，容易出错不推荐
+cd path_to_ncnn/build/tools/onnx
+cp /XXX/best.onnx best.onnx
+./onnx2ncnn best.onnx tank.param tank.bin
+报错解决方法
+https://blog.csdn.net/engchina/article/details/144889920
+
+### 选项2，x86系统下载编译完成的pnnx，可将多种模型转ncnn模型，后续成功运行的模型也是采用pnnx转化的
+https://github.com/pnnx/pnnx/releases/download/20241223/pnnx-20241223-linux.zip
+./pnnx best.pt inputshape=[1,3,224,224]
