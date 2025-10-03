@@ -1,0 +1,178 @@
+搭建美团低空经济挑战赛的仿真环境
+docekr容器-ubuntu22-ros2humble，px4v1.13.3
+
+ubutnu22建议在双系统的ubuntu下，安装docker（可以理解为ubuntu系统的一种虚拟机），创建docker容器
+相较于win下VMware的虚拟机，双系统ubuntu更流程，docekr容器方便一个项目一容器进行管理以及提交镜像;doceker容器也更好统一环境
+
+
+###################################安装docker##################################
+https://www.sysgeek.cn/install-docker-ubuntu/
+https://blog.csdn.net/littlewells/article/details/142616408
+
+docker基础操作
+显示全部容器
+docker ps -a
+创建实例容器
+docker run hello-world
+查看镜像
+docker images
+删除容器
+docker rm xxx
+进入容器
+sudo docker exec -it xxx /bin/bash
+另存为镜像
+docker commit px4 px4v1.13.0
+重命名
+docker rename px4 new
+删除镜像
+docker rmi px4
+
+
+将教程中的网站替换为，以下成功下载ros镜像的镜像网站
+gedit /etc/docker/daemon.json
+######################################
+{
+  "registry-mirrors": [
+    "https://docker.m.daocloud.io",
+    "https://mirror.baidubce.com",
+    "http://hub-mirror.c.163.com"
+  ]
+}
+######################################
+
+###################################创建容器##################################
+https://blog.csdn.net/littlewells/article/details/142616408
+
+###拉取镜像
+docker pull osrf/ros:humble-desktop-full
+
+#创建容器
+sudo docker run -dit \
+--name=px4 \
+--gpus all \
+-e NVIDIA_DRIVER_CAPABILITIES=all \
+-v /etc/passwd:/etc/passwd:ro \
+-v /etc/group:/etc/group:ro \
+-v /dev:/dev \
+-v /home/chen:/home/chen \
+-v /tmp/.X11-unix:/tmp/.X11-unix  \
+-e DISPLAY=unix$DISPLAY \
+-w /home/chen \
+--user $(id -u):$(id -g) \
+--privileged  \
+--net=host \
+--restart=no \
+osrf/ros:humble-desktop-full
+
+#######设置一键启动
+https://blog.csdn.net/littlewells/article/details/142616408
+gedit ~/.docker/setup/px4
+#######################################################
+xhost +local:docker
+echo "请输入指令控制px4容器: 启动(s) 重启(r) 进入(e)  关闭(c):"
+read choose
+case $choose in
+s) docker start px4;;
+r) docker restart px4;;
+e) docker exec -it px4 /bin/bash;;
+c) docker stop px4;;
+esac
+newgrp docker
+########################################################
+sudo chmod +x ~/.docker/setup/px4
+gedit ~/.bashrc
+########################
+# docker
+export PATH=$PATH:/home/chen/.docker/setup
+########################
+
+#####设置容器内免密码获取su权限
+管理员模式进入容器
+docker exec -u 0 -it px4 bash
+apt update && apt install -y sudo
+passwd root
+passwd chen
+echo "chen ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
+
+#退出容器，重新普通用户进入
+exit
+px4
+sudo apt update
+sudo apt install gedit
+sudo apt install wget
+### 更新系统源
+sudo wget http://fishros.com/install -O fishros && . fishros
+
+
+##########################容器内下载编译PX4v1.13.3##########################
+### 要在容器内git，不然会出现uid不匹配，git不能加sudo否则会触犯git的安全机制
+cd ~
+git clone https://gitee.com/voima/PX4-Autopilot.git -b v1.13.3
+cd PX4-Autopilot/
+sudo git checkout v1.13.3
+###安装环境
+git submodule update --init --recursive
+###换源加速
+sudo apt install python3-pip
+pip3 install --upgrade pip
+pip3 config set global.index-url https://mirrors.aliyun.com/pypi/simple/
+sudo -H pip3 install Cython
+###镜像加速下载，脚本配置环境
+sudo bash ./Tools/setup/ubuntu.sh
+
+
+#####安装gazebo
+sudo apt-get update
+sudo apt install libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly
+sudo apt-get install lsb-release wget gnupg
+sudo apt-get install ros-humble-gazebo-*
+
+### 添加环境变量
+gedit ~/.bashrc
+# >>> for my docker px4 >>>
+source /opt/ros/humble/setup.bash
+source ~/ros2_ws/install/setup.bash
+export GAZEBO_MODEL_PATH=${GAZEBO_MODEL_PATH}:/usr/share/gazebo/models:/usr/share/gazebo-11/models
+export GAZEBO_PLUGIN_PATH=${GAZEBO_PLUGIN_PATH}:/usr/lib/x86_64-linux-gnu/gazebo-11/plugins
+export GAZEBO_RESOURCE_PATH=${GAZEBO_RESOURCE_PATH}:/usr/share/gazebo:/usr/share/gazebo-11
+# <<< for my docker px4 <<<
+
+
+
+cd PX4-Autopilot
+source ~/.bashrc
+#################################编译
+make px4_sitl
+make px4_sitl gazebo
+起飞：commander takeoff
+降落：commander land
+
+
+###安装MAVROS
+https://blog.csdn.net/weixin_42037083/article/details/137102858
+sudo apt-get install ros-humble-mavros ros-humble-mavros-extras
+
+###安装geographiclib
+https://blog.csdn.net/zlm2004/article/details/144935740
+cp -r GeographicLib /usr/share
+/usr/share/GeographicLib/
+├── geoids/          # 高程模型（Geoids）数据集目录
+│   ├── egm84-5     # 示例：EGM84 高程模型（5' 分辨率）
+│   ├── egm96-5     # 你安装的 EGM96-5 数据集（5' 分辨率）
+│   
+│
+├── gravity/         # 重力模型（Gravity）数据集目录
+│   ├── egm96       # EGM96 地球重力模型
+│  
+│
+├── magnetic/        # 地磁模型（Magnetic）数据集目录
+    ├── emm2015     # EMM2015 地球磁场模型
+
+
+
+###验证MAVROS安装
+cd PX4-Autopilot
+make px4_sitl gazebo
+ros2 run mavros mavros_node --ros-args -p fcu_url:=udp://:14540@127.0.0.1:14557
+ros2 topic echo mavros/state
+

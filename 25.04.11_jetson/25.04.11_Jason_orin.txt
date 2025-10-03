@@ -1,0 +1,38 @@
+Jetson Orin Nano烧录系统
+不同ubuntu版本主机烧录有不同效果，如果烧录失败可以尝试切换为ubuntu22
+https://blog.csdn.net/qq_32603969/article/details/145793668
+短接GND和FC REC
+
+方法一：SD卡
+略
+
+方法二：固态硬盘
+主机ubunut24只能烧录6.2版本
+下载烧录软件,注意与容器ubuntu版本对上
+https://developer.nvidia.com/sdk-manager
+sudo apt install libcanberra-gtk-module
+sudo apt install locales libxshmfence1 libnss3 libatk-bridge2.0-0 libdrm2 libgtk-3-0 libgbm1 libcanberra-gtk3-module libx11-xcb1
+sudo dpkg -i software/sdkmanager_2.3.0-12626_amd64.deb
+
+启动
+sdkmanager
+
+VMware虚拟机ubunut18烧录5.14，5.15等低版本
+相同的烧录过程
+
+烧录wheeltec镜像
+保留sdkmanager文件
+cd OrinNX8GB_SSD_ROS1_Noetic_JP5.1.4/Linux_for_Tegra
+烧录jetpack5.1.4
+sudo ./tools/backup_restore/l4t_backup_restore.sh -e nvme0n1 -r jetson-orin-nano-devkit
+烧录jetpack6.2.0
+sudo ./tools/backup_restore/l4t_backup_restore.sh -b jetson-orin-super-module
+
+删除sdkmanager占用空间
+sudo rm -rf ~/nvidia ~/Downloads/nvidia ~/.nvsdkm_downloads ~/.nv ~/.nvsdkm /opt/nvidia/sdk_manager ~/.cache/nvidia/nvidia-sdk-manager
+docker images
+docker rmi jetpack_6.2_linux_jetson_orin_nx_targets
+docker rmi sdkmanager
+
+sudo apt remove libcanberra-gtk-module
+sudo apt purge libcanberra-gtk-module

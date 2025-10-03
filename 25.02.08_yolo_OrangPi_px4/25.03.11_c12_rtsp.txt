@@ -1,0 +1,135 @@
+香橙派获取云卓c12图像
+
+云卓c12视频输出定义
+网络IP信号
+RX-：网络IP信号
+RX+：网络IP信号
+TX-：网络IP信号
+TX+：网络IP信号
+可见光视频输出 RTSP码流rtsp://192.168.144.108:554/stream=1
+热成像视频输出 RTSP码流rtsp://192.168.144.108:555/stream=2
+c12硬件接口上的管脚顺序
+RX- RX+ TX- TX+ NC VCC GND
+供电7.2V-72V
+
+与RJ45的接线
+TX+	白橙
+TX-	橙
+RX+	白绿
+RX-	绿
+
+香橙派网口定义T568B
+无  无  RX- 无  无  RX+ TX- TX+
+棕 白粽 绿 白蓝 蓝 白绿 橙 白橙
+
+安装VCL######频繁报错，改为使用ffplay
+sudo apt-get install vlc libvlc-dev
+
+配置c12网口和本机在同一网段###########################
+可能会影响网线共享wifi给香橙派
+
+查看设备名称
+ip addr show
+香橙派网口2设备名enP4p65s0，笔记本网口名enp45s0
+
+暂时性配置
+先禁用enp45s0，避免在修改过程中出现冲突
+sudo ifconfig enp45s0 down
+分配一个与摄像头同一网段的IP地址
+sudo ifconfig enp45s0 192.168.144.100 netmask 255.255.255.0 up
+验证能接收到数据
+ifconfig enp45s0
+
+以下是永久化配置
+找到有线连接的接口名称（通常为enp45s0或eth0）
+sudo gedit /etc/netplan/00-installer-config.yaml
+
+network:
+  version: 2
+  renderer: networkd
+  ethernets:
+    enp45s0:  # 替换为你的接口名称
+      dhcp4: no
+      addresses: [192.168.144.100/24]
+      # 如需DNS可添加：
+      # nameservers:
+      #   addresses: [8.8.8.8, 8.8.4.4]
+
+sudo chmod 600 /etc/netplan/00-installer-config.yaml
+验证
+ping 192.168.144.108
+
+
+安装ffplay
+sudo apt install ffmpeg
+ffplay -rtsp_transport tcp "rtsp://192.168.144.108:554/stream=1"
+
+
+#############基于opencv，获取rtsp://192.168.144.108:554/stream=1并显示
+工程目录/home/chen/code/c12_rtsp
+main.cpp
+
+#include <opencv2/opencv.hpp>
+#include <iostream>
+using namespace cv;
+using namespace std;
+int main(int argc, char** argv)
+{
+    // RTSP流地址
+    string rtsp_url = "rtsp://192.168.144.108:554/stream=1";
+    // 创建视频捕获对象
+    VideoCapture cap(rtsp_url);
+    if (!cap.isOpened()) {
+        cerr << "Error: Failed to open RTSP stream!" << endl;
+        return -1;
+    }
+    // 创建显示窗口
+    namedWindow("RTSP Stream", WINDOW_AUTOSIZE);
+    Mat frame;
+    while (true) {
+        cap >> frame;  // 获取帧 
+        if (frame.empty()) {
+            cerr << "Error: Empty frame received!" << endl;
+            break;
+        }
+        imshow("RTSP Stream", frame);
+
+        // 按ESC键退出
+        if (waitKey(1) == 27) {
+            break;
+        }
+    }
+    // 释放资源
+    cap.release();
+    destroyAllWindows();
+    return 0;
+}
+
+
+CMakeLists.txt
+
+cmake_minimum_required(VERSION 3.5)
+project(RTSP_Viewer)
+
+# 查找OpenCV库
+find_package(OpenCV REQUIRED)
+
+# 包含头文件目录
+include_directories(${OpenCV_INCLUDE_DIRS})
+
+# 生成可执行文件
+add_executable(rtsp_viewer main.cpp)
+
+# 链接OpenCV库
+target_link_libraries(rtsp_viewer ${OpenCV_LIBS})
+
+mkdir build
+cd build
+cmake ..
+make
+./rtsp_viewer
+
+后续修改
+添加函数：裁剪并缩小至640*640
+添加函数：计算并显示帧率
+添加跳帧功能

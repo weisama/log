@@ -1,0 +1,59 @@
+关于Jetson Orin NX的wheeltec ros1（基于jetpack v5.1.4）系统无法打开mipi相机问题探索
+
+①英伟达官方系统jetpack v6.2、jetpack v5.1.4、jetpack v5.1.5均可打开mipi相机
+参考《MIPI相机使用指南(Jetson、Orin).pdf》中指令
+sudo /opt/nvidia/jetson-io/jetson-io.py
+配置完csi管脚，重启后
+nvgstcapture
+gst-launch-1.0  nvarguscamerasrc ! nvegltransform ! nveglglessink
+均可打开摄像头
+
+②关于wheeltec ros2（基于jetpack v6.2）系统打开mipi相机：
+系统本身已配置完csi管脚
+nvgstcapture
+gst-launch-1.0  nvarguscamerasrc ! nvegltransform ! nveglglessink
+仍无法打开mipi摄像头，问题如下：
+jason nano在上电启动时检测mipi相机，但wheeltec ros2（基于jetpack v6.2）系统相较于官方系统jetpack v6.2设定了风扇功率100%，导致开机时mipi相机供电电流电压不稳定，无法初始化mipi相机
+解决方案：
+参考https://blog.csdn.net/weixin_44355653/article/details/132042692
+安装jetpack系统监测
+sudo pip3 install jetson-stats
+sudo jtop
+按下6切换到设置风扇界面，设置为manual手动控制风扇速率，点击“-”降低风扇速率至30%以下
+关机并完全断开jason nano的供电
+重新插拔mipi相机，上电开机
+ls /dev/video*
+可看见成功识别mipi相机
+nvgstcapture
+gst-launch-1.0  nvarguscamerasrc ! nvegltransform ! nveglglessink
+均可打开摄像头
+
+
+③关于wheeltec ros1（基于jetpack v5.1.4）系统打开mipi相机：
+参照②的方法降低风扇速率可ls /dev/video*识别到mipi相机
+
+但运行
+nvgstcapture
+gst-launch-1.0  nvarguscamerasrc ! nvegltransform ! nveglglessink
+以及
+gst-launch-1.0 nvarguscamerasrc !      'video/x-raw(memory:NVMM), width=(int)1920, height=(int)1080, \
+     format=(string)NV12, framerate=(fraction)30/1' ! nvvidconv !      video/x-raw, format=I420 ! x264enc !      h264parse ! qtmux ! filesink      location=output.mp4 -e（等等设定不同的相机分辨率、频率、数据格式等参数）
+仍有运行GStreamer管道相关报错
+Error generated. /dvs/git/dirty/git-master_linux/multimedia/nvgstreamer/gst-nvarguscamera/gstnvarguscamerasrc.cpp, execute:791 Failed to create CaptureSession
+Redistribute latency...
+Got EOS from element "pipeline0".
+Execution ended after 0:00:00.005847644
+Setting pipeline to NULL ...
+Freeing pipeline ...
+
+
+官方论坛https://forums.developer.nvidia.com/查找问题原因，认为问题主要存在以下报错：
+Error generated. /dvs/git/dirty/git-master_linux/multimedia/nvgstreamer/gst-nvarguscamera/gstnvarguscamerasrc.cpp, execute:791 Failed to create CaptureSession
+但无帖子给出解决方法
+
+尝试过以下解决方案
+重装GStreamer、libv4l2库
+使用gst-launch-1.0 nvarguscamerasrc !      'video/x-raw(memory:NVMM), width=(int)1920, height=(int)1080, \ format=(string)NV12, framerate=(fraction)30/1' ! nvvidconv !      video/x-raw, format=I420 ! x264enc !      h264parse ! qtmux ! filesink      location=output.mp4 -e（等等设定不同的相机分辨率、频率、数据格式等参数）
+测试jason nano与mipi相机的iic通信，结果显示通信正常
+
+暂时无成功解决，等待wheeltec ros1更新至（基于jetpack v5.1.5）的版本再做尝试

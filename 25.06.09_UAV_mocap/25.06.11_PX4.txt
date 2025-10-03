@@ -1,0 +1,193 @@
+##########################本机编译PX4固件#################################
+ubuntu22下载编译PX4v1.13.3
+环境：ubuntu22.04，ros2 humble
+
+###########拉取镜像
+docker pull osrf/ros:humble-desktop-full
+
+sudo docker run -dit \
+--name=px4 \
+--gpus all \
+-e NVIDIA_DRIVER_CAPABILITIES=all \
+-v /etc/passwd:/etc/passwd:ro \
+-v /etc/group:/etc/group:ro \
+-v /dev:/dev \
+-v /home/chen:/home/chen \
+-v /tmp/.X11-unix:/tmp/.X11-unix  \
+-e DISPLAY=unix$DISPLAY \
+-w /home/chen \
+--user $(id -u):$(id -g) \
+--privileged  \
+--net=host \
+--restart=no \
+osrf/ros:humble-desktop-full
+
+#######设置一键启动
+https://blog.csdn.net/littlewells/article/details/142616408
+gedit ~/.docker/setup/px4
+#######################################################
+xhost +local:docker
+echo "请输入指令控制px4容器: 启动(s) 重启(r) 进入(e)  关闭(c):"
+read choose
+case $choose in
+s) docker start px4;;
+r) docker restart px4;;
+e) docker exec -it px4 /bin/bash;;
+c) docker stop px4;;
+esac
+newgrp docker
+########################################################
+sudo chmod +x ~/.docker/setup/px4
+gedit ~/.bashrc
+########################
+# docker
+export PATH=$PATH:/home/chen/.docker/setup
+########################
+
+#####设置容器内免密码获取su权限
+管理员模式进入容器
+docker exec -u 0 -it px4 bash
+apt update && apt install -y sudo
+passwd root
+passwd chen
+echo "chen ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
+
+exit
+px4
+sudo apt install gedit
+
+##########################容器内下载编译PX4v1.13.3
+### 要在容器内git，不然会出现uid不匹配，git不能加sudo否则会触犯git的安全机制
+git clone https://gitee.com/voima/PX4-Autopilot.git -b v1.13.3
+cd PX4-Autopilot/
+sudo git checkout v1.13.3
+git submodule update --init --recursive
+
+cd ..
+换源加速
+sudo apt install python3-pip
+pip3 install --upgrade pip
+pip3 config set global.index-url https://mirrors.aliyun.com/pypi/simple/
+sudo -H pip3 install Cython
+镜像加速下载，脚本配置环境
+sudo bash ./Tools/setup/ubuntu.sh  ########################
+
+添加环境变量
+gedit ~/.bashrc
+# >>> for my docker px4 >>>
+source /opt/ros/humble/setup.bash
+source ~/catkin_ws/devel/setup.bash
+source ~/PX4-Autopilot/Tools/simulation/gazebo-classic/setup_gazebo.bash ~/PX4-Autopilot ~/PX4-Autopilot/build/px4_sitl_default
+export ROS_PACKAGE_PATH=$ROS_PACKAGE_PATH:~/PX4-Autopilot
+export ROS_PACKAGE_PATH=$ROS_PACKAGE_PATH:~/PX4-Autopilot/Tools/simulation/gazebo-classic/sitl_gazebo-classic
+# <<< for my docker px4 <<<
+
+#####如需gazebo仿真，安装gazebo环境
+sudo apt-get install libgazebo-dev
+sudo apt-get install libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly
+sudo apt-get install libignition-rendering3-dev libignition-transport8-dev libignition-common3-dev libignition-fuel-tools4-dev
+
+source ~/.bashrc
+编译##################################
+make px4_sitl
+make px4_sitl gazebo
+起飞：commander takeoff
+降落：commander land
+
+
+解锁文件夹
+sudo chown -R chen ~/PX4-Autopilot
+##########################本机编译PX4固件#################################
+
+飞控默认固件是PX4v1.13.3
+##########################QGC配置########################
+EKF2_AID_MASK = 0
+禁用GPS
+
+CBRK_SUPPLY_CHK = 894281
+无备用电池允许遥控解锁
+
+SYS_CTRL_ALLOC = Enable
+允许控制分配功能
+
+加载超维空间科技m0-f410固件参数
+更新其中PID（MPC_xxx）参数
+##########################QGC配置########################
+
+##########################机载电脑下载MAVROS#################################
+修改QGC中参数
+MAV_1_CONFIG：TELLEM2
+MAV_1_MODE：Onboard
+SER_TEL2_BAUD：961200 8N1
+
+笔记本通过串口连接TELLEM2
+TELLEM2： 5V TX RX CTS RTS GND
+树莓派4b： 5V 5V GND TX RX
+
+安装MAVROS######
+https://blog.csdn.net/weixin_42037083/article/details/137102858
+sudo apt-get install ros-humble-mavros ros-humble-mavros-extras
+
+安装geographiclib
+https://blog.csdn.net/zlm2004/article/details/144935740
+sudo cp -r GeographicLib /usr/share
+
+
+查看最新的串口消息
+sudo dmesg | tail
+ls /dev/ttyAMA*
+sudo usermod -aG dialout $USER
+sudo chmod 777 /dev/ttyAMA0
+设置树莓派串口
+sudo nano /boot/firmware/config.txt
+################
+# 禁用蓝牙释放 ttyAMA0
+dtoverlay=disable-bt
+# 启用硬件串口
+enable_uart=1
+# 修复串口时钟稳定性（树莓派3/4必需）
+dtoverlay=miniuart-bt
+###################
+
+修改mavros串口设备和波特率
+sudo nano /opt/ros/humble/share/mavros/launch/px4.launch
+##########################################
+<arg name="fcu_url" default="/dev/ttyAMA0:921600" />
+###########################################
+
+ros2 launch mavros px4.launch
+ros2 launch mavros px4.launch fcu_url:=/dev/ttyAMA0:921600
+
+ros2 topic list
+
+# 检查MAVROS状态
+ros2 topic echo /mavros/state
+##以下需接入GPS
+GPS数据
+ros2 topic echo /mavros/global_position/global
+本地坐标系，单位米
+ros2 topic echo /mavros/local_position/pose
+磁罗盘航向角
+ros2 topic echo /mavros/global_position/compass_hdg
+##########################机载电脑下载MAVROS#################################
+
+
+
+#################机载电脑mavros连接px4后，与机载电脑同wifi的本机QGC远程连接
+sudo nano /opt/ros/humble/share/mavros/launch/px4.launch
+###############################################
+<arg name="gcs_url" default="udp://:14509@" />
+###############################################
+本机打开QGC，添加连接吊载无人机2
+type：UDP
+Port：14509
+###机载电脑IP
+Server：
+10.1.1.117:14509
+
+##################遥控连接px4后，手机QGC连接遥控
+QGC链接：https://pan.baidu.com/s/1Rne8v5KpRZjRkFYz9cPm3A?pwd=cwkj
+提取码：cwkj
+遥控连接px4后，QGC→左上角图标→通信连接→添加
+类型蓝牙，扫描选择云卓T10，密码默认1234
+

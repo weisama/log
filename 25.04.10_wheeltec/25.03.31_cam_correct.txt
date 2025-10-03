@@ -1,0 +1,94 @@
+usb摄像头畸变矫正教程
+使用ubuntu24.04系统，OpenCV-4.9.0，camke
+
+ls /dev/video*
+
+安装ffplay
+sudo apt install ffmpeg
+ffplay /dev/video0
+
+给相机调参
+sudo apt install libv4l-0 libv4l-dev
+sudo apt install v4l-utils
+v4l2-ctl -d /dev/video0 --info
+有输出说明摄像头支持libv4l2 开发库调参
+
+参数
+Brightness  0
+Contrast    90
+Saturation  80
+Sharpness   0
+Gamma       40
+
+创建工程测试usb摄像头
+cd /cam_usb_set
+rm -r build && mkdir build && cd build
+cmake ..
+make
+./set
+
+打印标定板
+创建工程畸变矫正
+根据内角数和方格实际大小修改代码参数
+例如A0标定板，6*8，115mm
+例如A4标定板，9*6，25mm
+cd /cam_usb_correct
+rm -r build && mkdir build && cd build
+cmake ..
+make
+./correct
+
+空格键记录当前标定图片，标定20-30张
+c键输出畸变参数，a键切换为畸变矫正后的图像
+输出：
+标定完成！重投影误差：0.296875
+相机矩阵：
+[302.7048929342819, 0, 298.6791162335703;
+ 0, 302.2019683382837, 234.9714757570849;
+ 0, 0, 1]
+畸变系数：[0.0615721521591663;
+ -0.09610650401456461;
+ 0.0004141072132062723;
+ 0.0008935300620624921;
+ 0.02529521259640314]
+ 
+ 与原相机内参
+[937.953869  0.000000    275.511513
+ 0.000000    946.903182  267.65329
+ 0.000000    0.000000    1.000000]
+ 有俩参数差别，原因是：原本的参数基于 1920×1080 分辨率，而校准图像为 640×480，属于正常现象
+ 重投影误差小于0.5则标定质量较高
+ 
+ 输出的畸变系数就是想要的结果
+结果记录在build/camera_params.yml
+
+
+
+Jetson nano使用IMX219摄像头进行标定
+摄像头接上csi视频线连接到Jetson nano后需重启系统
+https://blog.csdn.net/baidu_41617231/article/details/135214202
+sudo /opt/nvidia/jetson-io/jetson-io.py
+reboot
+ls /dev/video*
+sudo apt install -y v4l-utils
+v4l2-ctl --list-devices
+v4l2-ctl -d 0 --list-formats-ext
+nvgstcapture
+gst-launch-1.0  nvarguscamerasrc ! nvegltransform ! nveglglessink
+正常显示画面
+
+工程cam_csi_test是Jetson nano测试IMX219显示
+工程cam_csi_correct是Jetson nano使用IMX219标定
+
+使用GStreamer管道打开CSI摄像头，代码其余不变
+    // GStreamer管道参数配置（适配CSI摄像头）
+    std::string pipeline = "nvarguscamerasrc sensor-id=0 ! "
+        "video/x-raw(memory:NVMM), format=NV12, width=640, height=480, framerate=30/1 ! "
+        "nvvidconv flip-method=0 ! "
+        "video/x-raw, format=BGRx ! "
+        "videoconvert ! "
+        "video/x-raw, format=BGR ! "
+        "appsink drop=true";
+
+    // 使用GStreamer管道打开CSI摄像头
+    cv::VideoCapture cap(pipeline, cv::CAP_GSTREAMER);

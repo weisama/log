@@ -1,0 +1,193 @@
+gazebo中无人机通过opencv识别并跟踪小车
+#################################运行成功但无跟随效果
+https://anlper.cn/2021/10/23/PX4%E6%97%A0%E4%BA%BA%E6%9C%BA-Gazebo%E4%BB%BF%E7%9C%9F%E5%AE%9E%E7%8E%B0%E7%A7%BB%E5%8A%A8%E7%89%A9%E4%BD%93%E7%9A%84%E8%B7%9F%E8%B8%AA/
+
+需要声明的环境变量
+/etc/bash.bashrc 是全局配置文件，适用于所有用户
+
+source /home/chen/PX4-Autopilot/Tools/simulation/gazebo-classic/setup_gazebo.bash /home/chen/PX4-Autopilot /home/chen/PX4-Autopilot/build/px4_sitl_default 
+export ROS_PACKAGE_PATH=$ROS_PACKAGE_PATH:/home/chen/PX4-Autopilot
+export ROS_PACKAGE_PATH=$ROS_PACKAGE_PATH:/home/chen/PX4-Autopilot/Tools/simulation/gazebo-classic/sitl_gazebo-classic
+
+安装turtlebot3小车仿真
+sudo apt update
+sudo apt install ros-noetic-dynamixel-sdk
+sudo apt install ros-noetic-turtlebot3-msgs
+sudo apt install ros-noetic-turtlebot3
+sudo apt-get install ros-noetic-turtlebot3-gazebo
+sudo apt install ros-noetic-teleop-twist-keyboard
+
+gedit ~/.basherc
+export TURTLEBOT3_MODEL=burger
+
+roslaunch turtlebot3_gazebo turtlebot3_world.launch
+rosrun teleop_twist_keyboard teleop_twist_keyboard.py
+
+
+
+添加一个带有朝下深度相机的无人机launch
+cd /home/chen/PX4-Autopilot/launch
+cp mavros_posix_sitl.launch mavros_posix_sitl_cp.launch
+gedit mavros_posix_sitl_cp.launch
+######教程改错，以下为正确
+原
+<arg name="sdf" default="$(find mavlink_sitl_gazebo)/models/$(arg vehicle)/$(arg vehicle).sdf"/> 
+改为
+<arg name="sdf" default="$(find mavlink_sitl_gazebo)/models/$(arg my_model)/$(arg my_model).sdf"/>
+之上添加
+<arg name="my_model" default="cleariris_downward_depth_camera"/>
+
+修改深度相机模型的分辨率
+cd /home/chen/PX4-Autopilot/Tools/simulation/gazebo-classic/sitl_gazebo-classic/models/depth_camera
+gedit depth_camera.sdf
+改分辨率和速率
+<update_rate>10</update_rate>
+<width>400</width>
+<height>400</height>
+
+修改地面文件
+cd cd /home/chen/PX4-Autopilot/launch
+cp posix_sitl.launch posix_sitl_cp.launch
+gedit posix_sitl_cp.launch
+<arg name="world_name" value="$(arg world)"/>
+改为
+<arg name="world_name" value="$(find turtlebot3_gazebo)/worlds/empty.world"/>
+gedit mavros_posix_sitl_cp.launch
+<include file="$(find px4)/launch/posix_sitl.launch">
+改为
+<include file="$(find px4)/launch/posix_sitl_cp.launch">
+
+
+启动仿真
+source /home/chen/PX4-Autopilot/Tools/simulation/gazebo-classic/setup_gazebo.bash /home/chen/PX4-Autopilot /home/chen/PX4-Autopilot/build/px4_sitl_default 
+export ROS_PACKAGE_PATH=$ROS_PACKAGE_PATH:/home/chen/PX4-Autopilot
+export ROS_PACKAGE_PATH=$ROS_PACKAGE_PATH:/home/chen/PX4-Autopilot/Tools/simulation/gazebo-classic/sitl_gazebo-classic
+roslaunch px4 mavros_posix_sitl_cp.launch
+
+查看图像
+rviz
+添加一个image，话题如下
+/camera/rgb/image_raw
+起飞：commander takeoff
+降落：commander land
+
+
+添加小车
+
+gedit posix_sitl_cp.launch
+cd /home/chen/PX4-Autopilot/launch
+<!-- vehicle model and world -->上添加
+    <!-- car model and parameter -->
+    <arg name="model" default="$(env TURTLEBOT3_MODEL)" doc="model type [burger, waffle, waffle_pi]"/>
+    <arg name="x_pos" default="1.0"/>
+    <arg name="y_pos" default="1.0"/>
+    <arg name="z_pos" default="0.0"/>
+    <param name="robot_description" command="$(find xacro)/xacro --inorder $(find turtlebot3_description)/urdf/turtlebot3_burger.urdf.xacro" />
+    
+</launch>上添加
+    <!-- gazebo car model -->
+    <node pkg="gazebo_ros" type="spawn_model" name="spawn_urdf" args="-urdf -model turtlebot3_$(arg model) -x $(arg x_pos) -y $(arg y_pos) -z $(arg z_pos) -param robot_description" />
+
+
+修改小车颜色
+roscd turtlebot3_description
+cd urdf
+sudo gedit turtlebot3_burger.gazebo.xacro
+文件中所有 <material>Gazebo/xxx</material> 中的 xxx 全部改成 Black
+
+启动仿真和键盘控制小车
+roslaunch px4 mavros_posix_sitl_cp.launch
+commander takeoff
+rosrun teleop_twist_keyboard teleop_twist_keyboard.py
+
+
+cd catkin_ws/src
+offboard模式下实现无人机追踪小车
+步骤相似于25.03.07_px4_offboard.txt
+https://blog.csdn.net/manbushuizhong/article/details/123744960
+
+编译ros功能包offboard_opencv_follow_cat
+cd catkin_ws/src
+catkin_create_pkg offboard_opencv_follow_cat roscpp std_msgs geometry_msgs mavros_msgs mavros cv_bridge image_transport sensor_msgs
+
+目录下添加代码
+catkin_ws/src/offboard_opencv_follow_cat/src/offboard_opencv_node.cpp
+
+修改
+catkin_ws/src/offboard_opencv_follow_cat/CMakeLists.txt
+
+cmake_minimum_required(VERSION 3.0.2)
+project(offboard_opencv_follow_cat)
+
+find_package(catkin REQUIRED COMPONENTS
+  roscpp
+  std_msgs
+  geometry_msgs
+  mavros_msgs
+  mavros
+  cv_bridge
+  image_transport
+  sensor_msgs
+)
+
+find_package(OpenCV REQUIRED)  # OpenCV查找
+
+catkin_package()
+
+include_directories(
+  ${catkin_INCLUDE_DIRS}
+  ${OpenCV_INCLUDE_DIRS}  # OpenCV头文件路径
+)
+
+add_executable(offboard_opencv_node src/offboard_opencv_node.cpp)
+target_link_libraries( offboard_opencv_node
+  ${catkin_LIBRARIES}
+  ${OpenCV_LIBRARIES}  # 链接OpenCV库
+)
+
+
+
+安装opencv库（与香橙派统一OpenCV – 4.9.0）
+https://blog.csdn.net/KIK9973/article/details/118830187
+sudo apt update
+sudo apt install build-essential cmake git libgtk2.0-dev pkg-config libavcodec-dev libavformat-dev libswscale-dev
+
+下载https://opencv.org/releases/
+cd /home/chen/opencv-4.9.0
+mkdir -p build
+cd build
+cmake -D CMAKE_INSTALL_PREFIX=/usr/local -D CMAKE_BUILD_TYPE=Release -D OPENCV_GENERATE_PKGCONFIG=ON -D OPENCV_ENABLE_NONFREE=ON ..
+sudo make -j8
+sudo make install
+sudo gedit /etc/bash.bashrc
+#文件末尾添加以下内容 并保存
+PKG_CONFIG_PATH=$PKG_CONFIG_PATH:/usr/local/lib/pkgconfig
+export PKG_CONFIG_PATH
+source /etc/bash.bashrc
+创建动态库
+sudo gedit /etc/ld.so.conf.d/opencv.conf
+添加/usr/local/lib
+更新sudo ldconfig
+pkg-config --modversion opencv4 #查看版本号
+pkg-config --libs opencv4 #查看libs库
+
+
+
+编译功能包
+cd /home/chen/catkin_ws
+catkin_make
+启动仿真
+source /home/chen/PX4-Autopilot/Tools/simulation/gazebo-classic/setup_gazebo.bash /home/chen/PX4-Autopilot /home/chen/PX4-Autopilot/build/px4_sitl_default 
+export ROS_PACKAGE_PATH=$ROS_PACKAGE_PATH:/home/chen/PX4-Autopilot
+export ROS_PACKAGE_PATH=$ROS_PACKAGE_PATH:/home/chen/PX4-Autopilot/Tools/simulation/gazebo-classic/sitl_gazebo-classic
+roslaunch px4 mavros_posix_sitl_cp.launch
+
+rosrun teleop_twist_keyboard teleop_twist_keyboard.py
+
+rviz
+
+source catkin_ws/devel/setup.bash
+rosrun offboard_opencv_follow_cat offboard_opencv_node
+#################################运行成功但无跟随效果
+
+

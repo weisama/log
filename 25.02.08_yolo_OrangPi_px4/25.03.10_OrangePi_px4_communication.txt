@@ -1,0 +1,177 @@
+#####################################ros通过mavros获取各种px4消息，以及编写offboard模式功能包都无需编译px4
+安装px4v1.14.0，同25.03.03_docker_gazebo
+https://blog.csdn.net/weixin_42037083/article/details/137102858
+### 要在容器内git，不然会出现uid不匹配，git不能加sudo否则会触犯git的安全机制
+git clone https://gitee.com/voima/PX4-Autopilot.git -b v1.14.0
+cd PX4-Autopilot/
+git checkout v1.14.0
+gedit /home/chen/PX4-Autopilot/.gitmodules #######替换为教程中下载文件的路径
+git submodule update --init --recursive
+账号13076541053
+cd ..
+镜像加速下载，脚本配置环境
+换清华源加速
+sudo apt install python3-pip
+bash ./PX4-Autopilot/Tools/setup/ubuntu.sh  ########################
+报错ERROR: Invalid requirement: 'matplotlib>=3.0.*': .*
+gedit /home/chen/PX4-Autopilot/Tools/setup/requirements.txt
+改为matplotlib>=3.0
+
+以下添加到.bashrc，不同版本px4的gazebo路径不同，以下为1.14.0
+# >>> PX4 initialize >>>
+source /home/chen/PX4-Autopilot/Tools/simulation/gazebo-classic/setup_gazebo.bash /home/chen/PX4-Autopilot /home/chen/PX4-Autopilot/build/px4_sitl_default
+export ROS_PACKAGE_PATH=$ROS_PACKAGE_PATH:/home/chen/PX4-Autopilot
+export ROS_PACKAGE_PATH=$ROS_PACKAGE_PATH:/home/chen/PX4-Autopilot/Tools/simulation/gazebo-classic/sitl_gazebo-classic
+# <<< PX4 initialize <<<
+
+sudo apt install python3-pip
+pip3 install kconfiglib
+pip3 install --user jinja2
+pip3 install --user jsonschema
+sudo apt-get update
+sudo apt-get install libgstreamer1.0-0 gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly gstreamer1.0-libav gstreamer1.0-doc gstreamer1.0-tools gstreamer1.0-x gstreamer1.0-alsa gstreamer1.0-gl gstreamer1.0-gtk3 gstreamer1.0-qt5 gstreamer1.0-pulseaudio libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
+验证安装
+权限问题：sudo chown -R chen:chen /home/chen/PX4-Autopilot
+需要联网检查git
+cd PX4-Autopilot/
+make px4_sitl_default gazebo
+起飞：commander takeoff
+降落：commander land
+#########################################无需安装编译px4#############################
+
+#####################串口获取数据########################
+安装ros
+sudo wget http://fishros.com/install -O fishros && . fishros
+测试小海龟
+ros2 run turtlesim turtlesim_node
+新终端
+ros2 run turtlesim turtle_teleop_key
+
+
+安装MAVROS######
+https://blog.csdn.net/weixin_42037083/article/details/137102858
+sudo apt-get install ros-humble-mavros ros-humble-mavros-extras
+
+安装geographiclib
+https://blog.csdn.net/zlm2004/article/details/144935740
+sudo cp -r GeographicLib /usr/share
+
+验证MAVROS安装
+串口通信库
+sudo apt install python3-serial
+查看最新的串口消息
+sudo dmesg | tail
+ls /dev/ttyACM*
+sudo chmod 777 /dev/ttyACM0
+修改mavros串口设备和波特率
+cd /opt/ros/humble/share/mavros
+sudo gedit ./launch/px4.launch
+<arg name="fcu_url" default="/dev/ttyACM0:921600" />
+
+ros2 launch mavros px4.launch
+ros2 launch mavros px4.launch fcu_url:=/dev/ttyACM0:921600
+
+ros2 topic list
+
+GPS数据
+ros2 topic echo /mavros/global_position/global
+本地坐标系，单位米
+ros2 topic echo /mavros/local_position/pose
+磁罗盘航向角
+ros2 topic echo /mavros/global_position/compass_hdg
+
+打开qgc尝试路径规划的任务飞行
+切换为mission模式
+无法创建航路点，则QGC设置为英文
+删除走廊扫描任务
+上传任务
+
+
+###################offboard控制#########################
+mkdir -p ~/ros2_ws/src
+cd ~/ros2_ws/src
+ros2 pkg create --build-type ament_cmake offboard_pkg --dependencies rclcpp std_msgs geometry_msgs mavros_msgs
+
+编写offboard_node.cpp和CMakeLists.txt
+
+cd ~/ros2_ws
+colcon build --packages-select offboard_pkg
+
+
+笔记本打开仿真
+cd /home/chen/PX4-Autopilot
+make px4_sitl gazebo-classic_iris
+
+香橙派
+ros2 launch mavros px4.launch
+
+GPS数据
+ros2 topic echo /mavros/global_position/global
+本地坐标系，单位米
+ros2 topic echo /mavros/local_position/pose
+磁罗盘航向角
+ros2 topic echo /mavros/global_position/compass_hdg
+
+source ~/ros2_ws/install/setup.bash
+ros2 run offboard_pkg offboard_node
+
+###################offboard控制巡逻#########################
+mkdir -p ~/ros2_ws/src
+cd ~/ros2_ws/src
+ros2 pkg create --build-type ament_cmake offboard_patrol --dependencies rclcpp std_msgs geometry_msgs mavros_msgs
+
+编写offboard_node.cpp和CMakeLists.txt
+
+cd ~/ros2_ws
+colcon build --packages-select offboard_patrol
+
+笔记本打开仿真
+cd /home/chen/PX4-Autopilot
+make px4_sitl gazebo-classic_iris
+
+香橙派
+ros2 launch mavros px4.launch
+
+GPS数据
+ros2 topic echo /mavros/global_position/global
+本地坐标系，单位米
+ros2 topic echo /mavros/local_position/pose
+磁罗盘航向角
+ros2 topic echo /mavros/global_position/compass_hdg
+
+source ~/ros2_ws/install/setup.bash
+ros2 run offboard_patrol offboard_node
+
+###################开机自启动#########################
+gedit ~/ros2_ws/src/offboard_patrol/startup.sh
+
+#!/bin/bash
+source /opt/ros/humble/setup.bash
+source ~/ros2_ws/install/setup.bash
+# 启动ROS节点，并将输出重定向到日志文件
+ros2 launch mavros px4.launch > ~/ros2_ws/log/ros2_autostart.log 2>&1 &
+ros2 run offboard_patrol offboard_node >> ~/ros2_ws/log/ros2_autostart.log 2>&1
+
+chmod +x ~/ros2_ws/src/offboard_patrol/startup.sh
+sduo gedit /etc/systemd/system/ros2_autostart.service
+# 替换为你的用户名
+
+[Unit]
+Description=ROS 2 Autostart Service
+After=network.target
+
+[Service]
+Type=simple
+User=orangepi  
+ExecStart=/home/orangepi/ros2_ws/src/offboard_patrol/startup.sh
+WorkingDirectory=/home/orangepi/ros2_ws/src/offboard_patrol
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
+
+
+sudo systemctl daemon-reload
+sudo systemctl start ros2_autostart.service
+sudo systemctl enable ros2_autostart.service
+sudo systemctl status ros2_autostart.service

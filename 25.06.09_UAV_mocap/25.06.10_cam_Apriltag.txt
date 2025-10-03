@@ -1,0 +1,137 @@
+usb摄像头识别tag码方位和姿态6原数(Apriltag)
+https://blog.csdn.net/weixin_51200029/article/details/142338545
+https://blog.csdn.net/2301_76165902/article/details/142000488
+
+ssh -Y chen@192.168.110.234
+
+测试摄像头正常工作
+ls /dev/video*
+sudo apt install ffmpeg
+ffplay /dev/video0
+sudo apt install libv4l-0 libv4l-dev
+sudo apt install v4l-utils
+v4l2-ctl -d /dev/video0 --info
+
+ROS1创建工作空间
+rm -rf ~/catkin_ws/
+mkdir -p ~/catkin_ws/src
+cd ~/catkin_ws/src
+catkin_init_workspace
+cd ~/catkin_ws/
+catkin_make
+
+ROS2创建工作空间
+rm -rf ~/catkin_ws/
+mkdir -p ~/catkin_ws/src
+cd ~/catkin_ws
+sudo rosdep init
+rosdep install --from-paths src --ignore-src -y
+colcon build
+
+###################################安装usb_cam功能包###################################
+################################选项一
+软件包方式安装usb_cam功能包
+sudo apt-get install ros-melodic-usb-cam
+source /opt/ros/melodic/setup.bash
+roslaunch usb_cam usb_cam-test.launch
+修改相应配置
+gedit ~/catkin_ws/src/usb_cam/config/params_1.yaml
+例如video_device: "/dev/video0"
+###############################选项二（推荐）
+cd ~/catkin_ws/src
+git clone https://github.com/ros-drivers/usb_cam.git
+sudo apt install ros-humble-camera-info-manager
+sudo apt install python3-pydantic
+修改相应配置
+gedit ~/catkin_ws/src/usb_cam/config/params_1.yaml
+例如video_device: "/dev/video0"
+编译
+cd ~/catkin_ws
+rosdep install --from-paths src --ignore-src -y
+colcon build
+source ~/catkin_ws/install/setup.bash
+ros2 launch usb_cam camera.launch.py
+rviz2
+###################################安装usb_cam功能包###################################
+
+
+##########################安装apriltag-ros和安装Apriltag库##########################
+##########################选项一：apt安装（成功）
+https://blog.csdn.net/wangmj_hdu/article/details/112668252
+安装Apriltag库
+git clone https://github.com/AprilRobotics/apriltag.git
+cd apriltag
+mkdir build
+cd build
+cmake .. -DCMAKE_BUILD_TYPE=Release
+make
+sudo make install
+
+
+安装apriltag-ros
+mkdir -p ~/catkin_ws/src && cd ~/catkin_ws/src
+git clone https://github.com/christianrauch/apriltag_ros.git
+sudo apt install ros-humble-image-proc
+修改配置文件
+gedit ~/catkin_ws/src/apriltag_ros/cfg/tags_36h11.yaml
+##########
+size: 0.1
+ids: [1, 2]
+frames: [tag1, tag2]
+sizes: [0.1, 0.1] 
+##########
+gedit ~/catkin_ws/src/apriltag_ros/launch/camera_36h11.launch.yml
+
+cd ~/catkin_ws
+rosdep install --from-paths src --ignore-src -r -y
+colcon build --symlink-install
+ros2 launch apriltag_ros camera_36h11.launch.yml
+
+
+ros2 run apriltag_ros apriltag_node --ros-args \
+    -r image_rect:=/camera1/image_raw \
+    -r camera_info:=/camera1/camera_info \
+    --params-file `ros2 pkg prefix apriltag_ros`/share/apriltag_ros/cfg/tags_36h11.yaml
+
+##########################安装apriltag-ros和安装Apriltag库##########################
+
+
+相机标定，有畸变参数才能计算位置和旋转角
+sudo apt-get install ros-humble-camera-calibration
+ros2 launch usb_cam camera.launch.py
+注意修改网格数量和大小
+ros2 run camera_calibration cameracalibrator.py --size 6x9 --square 0.025 image:=/camera1/image_raw camera:=/camera1
+
+ros2 run camera_calibration cameracalibrator --size 6x9 --square 0.025 --ros-args -r image:=/camera1/image_raw -p camera:=camera:=/camera1
+标定数据保存后
+mkdir ~/catkin_ws/src/usb_cam/calibration
+tar -xzvf /tmp/calibrationdata.tar.gz -C ~/catkin_ws/src/usb_cam/calibration
+gedit ~/catkin_ws/src/usb_cam/launch/usb_cam-test.launch
+添加
+<param name="camera_info_url" type="string" value="file://$(find usb_cam)/calibration/ost.yaml" />
+
+
+生成二维码
+#######只能识别6*6
+https://chaitanyantr.github.io/apriltag.html
+
+source /opt/ros/humble/setup.bash
+source ~/catkin_ws/devel/setup.bash
+打开相机
+ros2 launch usb_cam camera.launch.py
+开启识别
+roslaunch apriltag_ros continuous_detection.launch
+选择/tag_detections_image话题查看识别画面
+rqt_image_view
+查看数据
+rostopic echo /tag_detections
+
+
+ros2 launch apriltag_ros apriltag_node.launch.py \
+  camera_name:=/camera \       # 相机命名空间（必须与驱动一致）
+  image_topic:=image_raw \     # 图像话题名称
+  camera_info_topic:=camera_info \  # 相机内参话题
+  settings_file:=/home/$USER/apriltag_ros_config/settings.yaml \
+  tags_file:=/home/$USER/apriltag_ros_config/tags.yaml
+
+

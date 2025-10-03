@@ -1,0 +1,16 @@
+docker容器启动工程报错：
+Error response from daemon: Cannot restart container px4: could not select device driver "" with capabilities: [[gpu]]
+nvidia-container-cli: initialization error: nvml error: driver not loaded
+
+lsmod | grep nvidia → 空
+nvidia-smi → 报错 driver not loaded
+lspci | grep nvidia → 硬件 RTX 3060 存在
+结论：驱动没加载
+
+
+mokutil --sb-state
+如果输出 SecureBoot enabled
+说明Secure Boot 阻止内核模块加载
+
+解决方法
+重启→F5进入BIOS→高级设置→Securit→Secure Boot→ 关掉。

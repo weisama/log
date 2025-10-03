@@ -1,0 +1,61 @@
+创建ubuntu22-ros_humble容器
+
+###############################创建docker容器##########################
+###########拉取镜像
+docker pull osrf/ros:humble-desktop-full
+
+sudo docker run -dit \
+--name=ubuntu22 \
+--gpus all \
+-e NVIDIA_DRIVER_CAPABILITIES=all \
+-v /etc/passwd:/etc/passwd:ro \
+-v /etc/group:/etc/group:ro \
+-v /dev:/dev \
+-v /home/chen:/home/chen \
+-v /tmp/.X11-unix:/tmp/.X11-unix  \
+-e DISPLAY=unix$DISPLAY \
+-w /home/chen \
+--user $(id -u):$(id -g) \
+--privileged  \
+--net=host \
+--restart=no \
+osrf/ros:humble-desktop-full
+
+#######设置一键启动
+https://blog.csdn.net/littlewells/article/details/142616408
+gedit ~/.docker/setup/ubuntu22
+#######################################################
+xhost +local:docker
+echo "请输入指令控制ubuntu22容器: 启动(s) 重启(r) 进入(e)  关闭(c):"
+read choose
+case $choose in
+s) docker start ubuntu22;;
+r) docker restart ubuntu22;;
+e) docker exec -it ubuntu22 /bin/bash;;
+c) docker stop ubuntu22;;
+esac
+newgrp docker
+########################################################
+sudo chmod +x ~/.docker/setup/ubuntu22
+gedit ~/.bashrc
+########################
+# docker
+export PATH=$PATH:/home/chen/.docker/setup
+########################
+
+#####设置容器内免密码获取su权限
+管理员模式进入容器
+docker exec -u 0 -it ubuntu22 bash
+apt update && apt install -y sudo
+passwd root
+passwd chen
+echo "chen ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
+
+exit
+ubuntu22
+sudo apt install gedit
+sudo apt install wget
+##########更新源
+sudo wget http://fishros.com/install -O fishros && . fishros
+############################### 创建docker容器 ##################################
+

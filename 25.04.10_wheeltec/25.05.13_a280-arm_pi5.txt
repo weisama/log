@@ -1,0 +1,74 @@
+ssh远程登录
+
+复制功能包到ros1容器装载的文件夹
+sudo cp path/to/xxx /home/wheeltec/ros1_shared_dir
+
+固定串口设备名称
+ls -l /dev
+gedit wheeltec_robot/src/turn_on_wheeltec_robot/wheeltec_udev.sh
+
+echo 'KERNEL=="ttyCH343USB*", ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="55d4", ATTRS{serial}=="5893011575", MODE="0777", GROUP="dialout", SYMLINK+="wheeltec_controller"' >/etc/udev/rules.d/wheeltec_controller.rules
+service udev reload
+sleep 2
+service udev restart
+
+sudo chmod 777 wheeltec_robot/src/turn_on_wheeltec_robot/wheeltec_udev.sh
+sudo wheeltec_robot/src/turn_on_wheeltec_robot/wheeltec_udev.sh
+sudo udevadm control --reload-rules
+sudo udevadm trigger
+ls -l /dev
+输出wheeltec_controller -> ttyCH343USB0
+
+设置X11显示屏幕的编号
+echo $DISPLAY
+xhost +local:root
+进入容器
+ros1_restart
+ros1
+使用树莓派外接屏幕显示
+export DISPLAY=:10.0
+export XAUTHORITY=/home/wheeltec/.Xauthority
+export LIBGL_ALWAYS_SOFTWARE=1
+apt install -y x11-apps
+xeyes
+
+进入容器更新软件
+ros1_restart
+ros1
+sudo wget http://fishros.com/install -O fishros && . fishros
+sudo apt update
+sudo apt upgrade
+设置环境
+gedit /root/.bashrc
+export DISPLAY=:10.0
+source /home/wheeltec/ros1_shared_dir/A150_SRC_Melodic/devel/setup.bash
+
+
+下载必要的功能包
+sudo apt-get update
+sudo apt-get install ros-melodic-moveit-msgs
+sudo apt-get install ros-melodic-moveit-ros-perception
+sudo apt-get install ros-melodic-moveit-ros-planning-interface
+apt-get install -y libcanberra-gtk-module libcanberra-gtk3-module
+apt-get install -y libgl1-mesa-glx libgl1-mesa-dri mesa-utils
+更新环境并编译
+source /opt/ros/melodic/setup.bash
+cd /home/wheeltec/ros1_shared_dir/xxx
+rosdep install --from-paths src --ignore-src -r -y
+catkin_make -DCATKIN_WHITELIST_PACKAGES="a280_demo"
+catkin_make -DCATKIN_WHITELIST_PACKAGES="a280_driver"
+catkin_make -DCATKIN_WHITELIST_PACKAGES="a280_demo"
+catkin_make -DCATKIN_WHITELIST_PACKAGES="a280_driver"
+
+
+1.色块识别夹取：
+roslaunch a280_demo color_grab_demo.launch
+
+2.键盘控制：
+roslaunch a280_demo keyboard_control.launch
+
+3.启动机械臂相机：
+roslaunch a280_demo a280_camera.launch
+
+4.启动ROS与STM32串口通信节点：
+roslaunch a280_driver a280_driver.launch
