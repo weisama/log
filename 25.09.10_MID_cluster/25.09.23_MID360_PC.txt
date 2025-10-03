@@ -137,7 +137,7 @@ ros2 pkg create point_cloud_filter --build-type ament_cmake --dependencies rclcp
 gedit ~/lidar.json
 ################################
 {
-    "intensity_threshold": 120,					#过滤强度阈值
+    "intensity_threshold": 160,					#过滤强度阈值
     "node_settings": {
         "livox_ros_driver2_topic": "/livox/lidar",		#初始点云话题
         "point_cloud_filter_topic": "/filtered_pointcloud",	#强度过滤点云话题
@@ -145,7 +145,7 @@ gedit ~/lidar.json
     }
 }
 ################################
-intensity_threshold:120可以滤除大部分杂物，180可以滤除全部杂物但反光球过小
+intensity_threshold:120可以滤除大部分杂物，160可以滤除全部杂物但反光球过小
 后续可视化一帧点云，发现就算阈值设置3,15mm直径的反光球总有一些帧完全无点云
 雷达激光波长905nｍ
 
@@ -187,10 +187,63 @@ sudo apt-get install nlohmann-json3-dev
 cd ~/ws_livox/src
 ros2 pkg create cluster_detection --build-type ament_cmake --dependencies rclcpp sensor_msgs pcl_ros pcl_conversions std_msgs geometry_msgs visualization_msgs
 
+###第三版添加了卡尔曼滤波和平滑轨迹
 gedit ~/lidar.json
 ################################
 {
-    "intensity_threshold": 120,					#过滤强度阈值
+    "intensity_threshold": 160,
+    "node_settings": {
+        "livox_ros_driver2_topic": "/livox/lidar",
+        "point_cloud_filter_topic": "/filtered_pointcloud",
+        "frame_id": "livox_frame"
+    },
+    "dbscan_parameters": {
+        "eps": 0.05,
+        "min_points": 5,
+        "max_points": 100
+    },
+    "ring_parameters": {
+        "target_diameter": 0.120
+    },
+    "kalman_filter": {
+        "enabled": true,
+        "process_noise": 0.1,
+        "measurement_noise": 0.1,
+        "prediction_enabled": true
+    },
+    "tracking_parameters": {
+        "tracking_threshold": 0.2,
+        "max_consecutive_misses": 3,
+        "min_detections_for_stable": 3
+    }
+}
+################################
+
+####第二版改为检测圆环
+gedit ~/lidar.json
+################################
+{
+    "intensity_threshold": 160,
+    "node_settings": {
+        "livox_ros_driver2_topic": "/livox/lidar",
+        "point_cloud_filter_topic": "/filtered_pointcloud",
+        "frame_id": "livox_frame"
+    },
+    "dbscan_parameters": {
+        "eps": 0.05,
+        "min_points": 5,
+        "max_points": 100
+    },
+    "ring_parameters": {
+        "target_diameter": 0.120
+    }
+}
+################################
+
+gedit ~/lidar.json
+################################
+{
+    "intensity_threshold": 160,					#过滤强度阈值
     "node_settings": {
         "livox_ros_driver2_topic": "/livox/lidar",		#初始点云话题
         "point_cloud_filter_topic": "/filtered_pointcloud",	#强度过滤点云话题
@@ -275,6 +328,5 @@ ros2 launch fast_lio mapping.launch.py
 /tf		动态坐标变换
 /tf_static	静态坐标变换
 ###################################FAST-LIO#####################################
-
 
 
