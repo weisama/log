@@ -1,0 +1,544 @@
+# SLAM模块一些基础功能包
+
+# 鲁班猫2使用SDK编译的Ubuntu22.04+ROS 2 Humble  
+## Cartographer + 镭神 N10 建图全流程日志
+
+---
+
+### 创建工作空间
+```bash
+rm -rf ~/slam_ws/
+mkdir -p ~/slam_ws/src
+cd ~/slam_ws
+rosdepc update
+rosdepc install --from-paths src --ignore-src -y
+colcon build
+```
+
+---
+
+### 固定串口
+```bash
+ls /dev/tty*
+sudo apt install udev
+
+# 查看供应商ID和设备ID
+udevadm info -q property -n /dev/ttyACM0 | grep -E "(ID_VENDOR_ID|ID_MODEL_ID)"
+# 查看序列号
+udevadm info -q property -n /dev/ttyACM0 | grep ID_SERIAL_SHORT
+# 查看产品名称
+udevadm info -q property -n /dev/ttyACM0 | grep ID_MODEL=
+```
+
+| 字段 | 值 |
+|---|---|
+| ID_VENDOR_ID | 1a86 |
+| ID_MODEL_ID | 55d4 |
+| ID_SERIAL_SHORT | 5954004011 |
+| ID_MODEL | USB Single Serial |
+
+```bash
+sudo nano /etc/udev/rules.d/99-usb-serial.rules
+```
+
+```udev
+SUBSYSTEM=="tty", ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="55d4", SYMLINK+="usb_robot", MODE="0666"
+```
+
+```bash
+sudo udevadm control --reload-rules
+sudo udevadm trigger
+ls -l /dev/usb_robot
+```
+
+---
+
+### 获取点云（N10 驱动）
+```bash
+# 安装各种依赖
+sudo apt install ros-humble-diagnostic-updater libpcap-dev
+sudo apt install libicu70=70.1-2
+sudo apt install libpcl-dev
+sudo apt-get install ros-$ROS_DISTRO-pcl-conversions ros-$ROS_DISTRO-pcl-ros
+
+
+rm -rf ~/slam_ws
+mkdir -p ~/slam_ws/src
+cd ~/slam_ws/src
+
+# 任选其一分支
+git clone -b N10_V1.0 https://github.com/Lslidar/Lslidar_ROS2_driver.git
+# git clone -b M10P/N10P https://github.com/Lslidar/Lslidar_ROS2_driver.git
+
+cp -r Lslidar_ROS2_driver/lslidar_driver .
+cp -r Lslidar_ROS2_driver/lslidar_msgs .
+rm -rf Lslidar_ROS2_driver
+```
+
+#### 修改串口号
+```bash
+gedit ~/slam_ws/src/lslidar_driver/src/lslidar_driver.cc
+# 将 ttyUSB0 改为 usb_robot
+```
+
+```bash
+gedit ~/slam_ws/src/lslidar_driver/params/lsx10.yaml
+# lidar_name: N10
+# ttyUSB0 -> usb_robot
+```
+
+#### 注释 rviz 相关行（25-37、40 行）
+```bash
+gedit ~/slam_ws/src/lslidar_driver/launch/lslidar_launch.py
+```
+
+#### 编译 & 运行
+```bash
+cd ~/slam_ws
+colcon build --packages-select lslidar_msgs
+colcon build --packages-select lslidar_driver
+```
+
+```bash
+echo "source ~/slam_ws/install/setup.bash" >> ~/.bashrc
+source ~/.bashrc
+```
+
+```bash
+# 启动雷达
+ros2 launch lslidar_driver lslidar_launch.py
+# 独立可视化
+rviz2 -d ~/slam_ws/src/lslidar_driver/rviz/lslidar.rviz
+```
+
+---
+
+### TF静态变换功能包
+
+相较于raspi版以改进为**map -> odom -> base_link -> laser_link**
+
+```bash
+sudo apt-get install ros-$ROS_DISTRO-tf2-tools
+sudo apt install ros-$ROS_DISTRO-rqt-tf-tree
+```
+
+```bash
+cd ~/slam_ws/src
+ros2 pkg create --build-type ament_cmake tf --dependencies rclcpp tf2_ros geometry_msgs
+mkdir -p tf/launch
+```
+
+#### 源码
+
+`gedit ~/slam_ws/src/tf/launch/tf_broadcaster.launch.py`
+
+```python
+from launch import LaunchDescription
+from launch.actions import DeclareLaunchArgument
+from launch.substitutions import LaunchConfiguration
+from launch_ros.actions import Node
+
+def generate_launch_description():
+    # 声明仿真时间参数（默认False）
+    use_sim_time = LaunchConfiguration('use_sim_time', default='False')
+
+    return LaunchDescription([
+        # 参数声明
+        DeclareLaunchArgument(
+            'use_sim_time',
+            default_value='False',
+            description='Use simulation (Gazebo or rosbag) clock if true'
+        ),
+
+        # 发布 map -> odom 的静态变换
+        Node(
+            package='tf2_ros',
+            executable='static_transform_publisher',
+            name='map_to_odom_broadcaster',
+            parameters=[{'use_sim_time': use_sim_time}],
+            arguments=['--x', '0', '--y', '0', '--z', '0',
+                       '--roll', '0', '--pitch', '0', '--yaw', '0',
+                       '--frame-id', 'map', '--child-frame-id', 'odom'],
+            output='screen'
+        ),
+
+        # 发布 odom -> base_link 的静态变换
+        Node(
+            package='tf2_ros',
+            executable='static_transform_publisher',
+            name='odom_to_base_broadcaster',
+            parameters=[{'use_sim_time': use_sim_time}],
+            arguments=['--x', '0', '--y', '0', '--z', '0',
+                       '--roll', '0', '--pitch', '0', '--yaw', '0',
+                       '--frame-id', 'odom', '--child-frame-id', 'base_link'],
+            output='screen'
+        ),
+
+        # 发布 base_link -> laser_link 的静态变换
+        Node(
+            package='tf2_ros',
+            executable='static_transform_publisher',
+            name='base_to_laser_broadcaster',
+            parameters=[{'use_sim_time': use_sim_time}],
+            arguments=['--x', '0', '--y', '0', '--z', '0',
+                       '--roll', '0', '--pitch', '0', '--yaw', '0',
+                       '--frame-id', 'base_link', '--child-frame-id', 'laser_link'],
+            output='screen'
+        ),
+    ])
+```
+
+`gedit ~/slam_ws/src/tf/src/tf_broadcaster.cpp`
+```cpp
+#include <memory>
+#include "rclcpp/rclcpp.hpp"
+#include "tf2_ros/static_transform_broadcaster.h"
+#include "geometry_msgs/msg/transform_stamped.h"
+#include <tf2/LinearMath/Quaternion.h>
+
+class StaticTFBroadcaster : public rclcpp::Node
+{
+public:
+    StaticTFBroadcaster()
+    : Node("tf_broadcaster")
+    {
+        tf_broadcaster_ = std::make_shared<tf2_ros::StaticTransformBroadcaster>(this);
+        
+        // 发布静态变换
+        publish_transforms();
+    }
+
+private:
+    void publish_transforms()
+    {
+        std::vector<geometry_msgs::msg::TransformStamped> transforms;
+        
+        // map -> odom 变换
+        auto map_to_odom = create_transform("map", "odom", 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
+        transforms.push_back(map_to_odom);
+        
+        // odom -> base_link 变换
+        auto odom_to_base = create_transform("odom", "base_link", 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
+        transforms.push_back(odom_to_base);
+        
+        // base_link -> laser_link 变换
+        auto base_to_laser = create_transform("base_link", "laser_link", 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
+        transforms.push_back(base_to_laser);
+        
+        // 发布所有变换
+        tf_broadcaster_->sendTransform(transforms);
+        
+        RCLCPP_INFO(this->get_logger(), "Published static transforms");
+    }
+    
+    geometry_msgs::msg::TransformStamped create_transform(
+        const std::string& parent_frame,
+        const std::string& child_frame,
+        double x, double y, double z,
+        double roll, double pitch, double yaw)
+    {
+        geometry_msgs::msg::TransformStamped transform;
+        
+        transform.header.stamp = this->get_clock()->now();
+        transform.header.frame_id = parent_frame;
+        transform.child_frame_id = child_frame;
+        
+        transform.transform.translation.x = x;
+        transform.transform.translation.y = y;
+        transform.transform.translation.z = z;
+        
+        // 将欧拉角转换为四元数
+        tf2::Quaternion q;
+        q.setRPY(roll, pitch, yaw);
+        transform.transform.rotation.x = q.x();
+        transform.transform.rotation.y = q.y();
+        transform.transform.rotation.z = q.z();
+        transform.transform.rotation.w = q.w();
+        
+        return transform;
+    }
+    
+    std::shared_ptr<tf2_ros::StaticTransformBroadcaster> tf_broadcaster_;
+};
+
+int main(int argc, char** argv)
+{
+    rclcpp::init(argc, argv);
+    auto node = std::make_shared<StaticTFBroadcaster>();
+    rclcpp::spin(node);
+    rclcpp::shutdown();
+    return 0;
+}
+```
+
+#### 4.2 Launch / CMake / package.xml
+`gedit ~/slam_ws/src/tf/launch/tf_broadcaster.launch.py`
+```python
+from launch import LaunchDescription
+from launch_ros.actions import Node
+
+def generate_launch_description():
+    return LaunchDescription([
+        # 发布 map -> odom 的变换
+        # 在实际应用中，此变换通常由里程计或 SLAM 节点（如你的 Cartographer）动态发布。
+        # 此处发布一个静态初始变换，作为SLAM建图的起点。
+        Node(
+            package='tf2_ros',
+            executable='static_transform_publisher',
+            name='map_to_odom_broadcaster',
+            arguments=['0', '0', '0', '0', '0', '0', 'map', 'odom'],
+            output='screen'
+        ),
+        # 发布 odom -> base_link 的变换
+        # 同样，此变换通常由里程计节点提供。此处发布静态变换意味着你暂时假设机器人底盘没有移动。
+        # 这对于调试传感器关系是可行的，但长期运行需替换为真实的里程计源。
+        Node(
+            package='tf2_ros',
+            executable='static_transform_publisher',
+            name='odom_to_base_broadcaster',
+            arguments=['0', '0', '0', '0', '0', '0', 'odom', 'base_link'],
+            output='screen'
+        ),
+        # 发布 base_link -> laser_link 的变换
+        # 这是你激光雷达在机器人上的**固定安装位置**，是使用静态变换发布器的典型场景。
+        # 参数含义：x=0米, y=0米, z=0米, 绕roll轴旋转0度, 绕pitch轴旋转0度, 绕yaw轴旋转0度。
+        Node(
+            package='tf2_ros',
+            executable='static_transform_publisher',
+            name='base_to_laser_broadcaster',
+            arguments=['0', '0', '0', '0', '0', '0', 'base_link', 'laser_link'],
+            output='screen'
+        ),
+    ])
+```
+
+`gedit ~/slam_ws/src/tf/CMakeLists.txt`
+```cmake
+cmake_minimum_required(VERSION 3.8)
+project(tf)
+
+# 检查编译器是否符合C++17标准
+if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+  add_compile_options(-Wall -Wextra -Wpedantic)
+endif()
+
+# 查找依赖
+find_package(ament_cmake REQUIRED)
+find_package(rclcpp REQUIRED)
+find_package(tf2_ros REQUIRED)
+find_package(geometry_msgs REQUIRED)
+
+# 如果有C++节点，添加可执行文件
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/tf_broadcaster.cpp)
+  add_executable(tf_broadcaster src/tf_broadcaster.cpp)
+  ament_target_dependencies(tf_broadcaster 
+    rclcpp 
+    tf2_ros 
+    geometry_msgs
+  )
+  
+  # 安装可执行文件
+  install(TARGETS
+    tf_broadcaster
+    DESTINATION lib/${PROJECT_NAME}
+  )
+endif()
+
+# 安装launch文件
+install(DIRECTORY
+  launch
+  DESTINATION share/${PROJECT_NAME}
+)
+
+if(BUILD_TESTING)
+  find_package(ament_lint_auto REQUIRED)
+  # 以下行会忽略ament_lint_auto找到的ament_lint_common包
+  # 取消注释以执行lint测试
+  # ament_lint_auto_find_test_dependencies()
+endif()
+
+ament_package()
+```
+
+`gedit ~/slam_ws/src/tf/package.xml`
+```xml
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypelayout="1.0"?>
+<package format="3">
+  <name>tf</name>
+  <version>0.0.0</version>
+  <description>C++ TF broadcaster package for ROS2 Foxy</description>
+  <maintainer email="your_email@example.com">Your Name</maintainer>
+  <license>Apache License 2.0</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <depend>rclcpp</depend>
+  <depend>tf2_ros</depend>
+  <depend>geometry_msgs</depend>
+  <depend>launch</depend>
+  <depend>launch_ros</depend>
+
+  <test_depend>ament_lint_auto</test_depend>
+  <test_depend>ament_lint_common</test_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>
+```
+
+#### 编译 & 测试
+```bash
+cd ~/slam_ws
+colcon build --packages-select tf
+```
+
+```bash
+source install/setup.bash
+```
+
+```bash
+# 打印需在发布前，因为只发布一次
+ros2 topic echo /tf_static
+# 启动tf变换
+ros2 launch tf tf_broadcaster.launch.py
+# 可视化tf变换
+ros2 run rqt_tf_tree rqt_tf_tree
+```
+
+---
+
+### 串口输出坐标（可选）
+#### 法一：固定串口（USB-TTL）
+同第 2 步，设备名 `usb_upper`。
+
+#### 法二：GPIO 串口（ttyAMA0）
+```bash
+sudo nano /boot/firmware/config.txt
+# 添加
+dtoverlay=disable-bt
+enable_uart=1
+dtoverlay=miniuart-bt
+```
+
+#### 串口发送功能包
+```bash
+cd ~/slam_ws/src
+ros2 pkg create --build-type ament_cmake serial_odom_sender --dependencies rclcpp nav_msgs
+gedit ~/slam_ws/src/serial_odom_sender/src/serial_odom_sender.cpp
+gedit ~/slam_ws/src/serial_odom_sender/CMakeLists.txt
+# 编译
+cd ~/slam_ws
+colcon build --packages-select serial_odom_sender
+
+# 启动点云
+ros2 launch lslidar_driver lslidar_launch.py
+# 启动里程计
+ros2 launch rf2o_laser_odometry rf2o_laser_odometry.launch.py
+# 串口输出坐标
+ros2 run serial_odom_sender serial_odom_sender
+
+# 图形化界面串口软件
+sudo apt-get install cutecom
+sudo cutecom
+
+#数据格式
+发送频率是坐标话题频率
+波特率115200
+数据类型8N1
+xyz单位为cm，yaw单位为度
+通信协议：
+帧头 0xAA
+x高八位
+x第八位
+y高八位
+y第八位
+z高八位
+z第八位
+yaw高八位
+yaw第八位
+帧尾 0x0A
+```
+
+---
+
+### 开机自启动
+`~/slam_autostart.sh`
+```bash
+#!/bin/bash
+# 加载环境
+source /opt/ros/humble/setup.bash
+source /home/chen/slam_ws/install/setup.bash
+sleep 3
+# 启动命令
+ros2 launch lslidar_driver lslidar_launch.py &
+sleep 3
+ros2 launch rf2o_laser_odometry rf2o_laser_odometry.launch.py &
+sleep 3
+ros2 run serial_odom_sender serial_odom_sender &
+# 防止脚本退出
+while true; do sleep 1000; done
+```
+
+```bash
+chmod +x ~/slam_autostart.sh
+```
+
+`sudo nano /etc/systemd/system/slam_autostart.service`
+```ini
+[Unit]
+Description=ROS 2 Autostart Service
+After=network.target
+
+[Service]
+Type=simple
+User=chen
+ExecStart=/home/chen/slam_autostart.sh
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target
+```
+
+#### 设置开机自启动
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable slam_autostart.service
+sudo systemctl start slam_autostart.service
+
+# 停止服务
+sudo systemctl stop slam_autostart.service
+# 禁用开机自启动
+sudo systemctl disable slam_autostart.service
+```
+
+---
+
+### ubuntu 电脑接收打印
+```bash
+mkdir -p ~/slam_ws/src
+cd ~/slam_ws/src
+ros2 pkg create --build-type ament_cmake serial_odom_receiver
+gedit ~/slam_ws/src/serial_odom_receiver/src/serial_odom_receiver.cpp
+gedit ~/slam_ws/src/serial_odom_receiver/package.xml
+gedit ~/slam_ws/src/serial_odom_receiver/CMakeLists.txt
+# 编译
+cd ~/slam_ws
+colcon build --packages-select serial_odom_receiver
+# 运行
+source ~/slam_ws/install/setup.bash
+ros2 run serial_odom_receiver serial_odom_receive
+```
+
+
+
+
+
+
+
+
+
+
+
