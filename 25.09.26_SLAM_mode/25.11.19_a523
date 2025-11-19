@@ -1,0 +1,21 @@
+# 企划信息科技全志A523核心板+底板，基础开发
+
+## 连接板子
+
+串口转ttl连接GND/UART0-RX/UART0-TX，MobaXterm连接板子并设置用户
+
+```
+# 官方默认用户root密码1
+
+# 查看所有用户
+cat /etc/passwd
+
+# 创建用户
+adduser chen
+usermod -aG sudo chen
+ls /home
+su - chen
+
+# 修改密码都为123
+passwd chen
+passwd root
