@@ -1,0 +1,11 @@
+## 从开发中模块到出售模块，版本v1.0.0
+
+**硬件是KICKPI官方的RK3568_K1B**
+
+## 调整代码位置
+
+```
+cd /opt/ros/humble
+sudo mkdir -p config
+sudo cp config/* /opt/ros/humble/config
+```
